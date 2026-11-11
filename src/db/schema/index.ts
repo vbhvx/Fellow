@@ -7,6 +7,7 @@ import {
   integer,
   doublePrecision,
   jsonb,
+  bigserial,
   index,
   unique,
 } from 'drizzle-orm/pg-core';
@@ -282,58 +283,14 @@ export const collaborationEvents = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     publishedAt: timestamp('published_at', { withTimezone: true }),
     attemptCount: integer('attempt_count').default(0).notNull(),
+    seq: bigserial('seq', { mode: 'number' }).notNull(),
+    nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).defaultNow().notNull(),
+    lastError: text('last_error'),
+    failedAt: timestamp('failed_at', { withTimezone: true }),
   },
   (table) => ({
-    outboxPublishIdx: index('outbox_publish_idx').on(table.publishedAt, table.createdAt),
     outboxOrgIdx: index('outbox_org_idx').on(table.organizationId, table.createdAt),
+    outboxOrgSeqIdx: index('outbox_org_seq_idx').on(table.organizationId, table.seq),
   })
 );
 
-// Relations
-export const usersRelations = relations(users, ({ many }) => ({
-  memberships: many(organizationMemberships),
-  projectMemberships: many(projectMemberships),
-  createdTasks: many(tasks, { relationName: 'taskCreator' }),
-  assignedTasks: many(tasks, { relationName: 'taskAssignee' }),
-  comments: many(taskComments),
-  notifications: many(notifications),
-}));
-
-export const organizationsRelations = relations(organizations, ({ many }) => ({
-  memberships: many(organizationMemberships),
-  invitations: many(organizationInvitations),
-  projects: many(projects),
-}));
-
-export const projectsRelations = relations(projects, ({ one, many }) => ({
-  organization: one(organizations, {
-    fields: [projects.organizationId],
-    references: [organizations.id],
-  }),
-  memberships: many(projectMemberships),
-  workflowStatuses: many(workflowStatuses),
-  tasks: many(tasks),
-}));
-
-export const tasksRelations = relations(tasks, ({ one, many }) => ({
-  project: one(projects, {
-    fields: [tasks.projectId],
-    references: [projects.id],
-  }),
-  status: one(workflowStatuses, {
-    fields: [tasks.statusId],
-    references: [workflowStatuses.id],
-  }),
-  creator: one(users, {
-    fields: [tasks.createdBy],
-    references: [users.id],
-    relationName: 'taskCreator',
-  }),
-  assignee: one(users, {
-    fields: [tasks.assigneeId],
-    references: [users.id],
-    relationName: 'taskAssignee',
-  }),
-  comments: many(taskComments),
-  activities: many(taskActivities),
-}));
