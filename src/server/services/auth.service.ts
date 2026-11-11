@@ -5,6 +5,12 @@ import { BadRequestError, UnauthorizedError, NotFoundError } from '@/server/erro
 import { eq } from 'drizzle-orm';
 import crypto from 'crypto';
 
+let dummyHash: Promise<string> | undefined;
+function getDummyHash() {
+  dummyHash ??= hashPassword(crypto.randomUUID());
+  return dummyHash;
+}
+
 export class AuthService {
   static async register(data: { name: string; email: string; password: string }) {
     const existing = await db.select().from(users).where(eq(users.email, data.email.toLowerCase())).limit(1);
@@ -44,12 +50,10 @@ export class AuthService {
 
   static async login(data: { email: string; password: string }) {
     const [user] = await db.select().from(users).where(eq(users.email, data.email.toLowerCase())).limit(1);
-    if (!user) {
-      throw new UnauthorizedError('Invalid email or password');
-    }
 
-    const isValid = await verifyPassword(data.password, user.passwordHash);
-    if (!isValid) {
+    // Always pay the bcrypt cost so response time doesn't reveal whether the email exists.
+    const isValid = await verifyPassword(data.password, user?.passwordHash ?? (await getDummyHash()));
+    if (!user || !isValid) {
       throw new UnauthorizedError('Invalid email or password');
     }
 
