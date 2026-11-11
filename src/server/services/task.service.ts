@@ -77,7 +77,8 @@ export class TaskService {
       .from(tasks)
       .leftJoin(users, eq(tasks.assigneeId, users.id))
       .where(and(...conditions))
-      .orderBy(asc(tasks.position));
+      // id breaks ties deterministically if two positions ever coincide
+      .orderBy(asc(tasks.position), asc(tasks.id));
 
     return taskRows;
   }
@@ -475,19 +476,37 @@ export class TaskService {
         }
       }
 
-      // No neighbours given (e.g. dropped onto a column header): append to the end of the column.
-      if (!moveData.prevTaskId && !moveData.nextTaskId) {
+      // The client's neighbour hints reflect the board as it last saw it. Re-derive the gap from
+      // committed state under the column lock, so two cards dropped into the same slot at once get
+      // distinct positions instead of the same midpoint.
+      const otherTasksInColumn = and(
+        eq(tasks.projectId, targetProjectId),
+        eq(tasks.statusId, moveData.statusId),
+        sql`${tasks.id} != ${taskId}`,
+        sql`${tasks.deletedAt} IS NULL`
+      );
+      if (prevPos !== null) {
+        const [successor] = await tx
+          .select({ position: tasks.position })
+          .from(tasks)
+          .where(and(otherTasksInColumn, sql`${tasks.position} > ${prevPos}`))
+          .orderBy(asc(tasks.position))
+          .limit(1);
+        nextPos = successor?.position ?? null;
+      } else if (nextPos !== null) {
+        const [predecessor] = await tx
+          .select({ position: tasks.position })
+          .from(tasks)
+          .where(and(otherTasksInColumn, sql`${tasks.position} < ${nextPos}`))
+          .orderBy(desc(tasks.position))
+          .limit(1);
+        prevPos = predecessor?.position ?? null;
+      } else {
+        // No usable neighbours (e.g. dropped onto a column header): append to the end.
         const [last] = await tx
           .select({ position: tasks.position })
           .from(tasks)
-          .where(
-            and(
-              eq(tasks.projectId, targetProjectId),
-              eq(tasks.statusId, moveData.statusId),
-              sql`${tasks.id} != ${taskId}`,
-              sql`${tasks.deletedAt} IS NULL`
-            )
-          )
+          .where(otherTasksInColumn)
           .orderBy(desc(tasks.position))
           .limit(1);
         prevPos = last?.position ?? null;
