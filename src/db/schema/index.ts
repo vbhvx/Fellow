@@ -7,8 +7,8 @@ import {
   integer,
   doublePrecision,
   jsonb,
-  uniqueIndex,
   index,
+  unique,
 } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 
@@ -52,7 +52,7 @@ export const organizationMemberships = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({
-    orgUserIdx: uniqueIndex('org_user_idx').on(table.organizationId, table.userId),
+    orgUserUnique: unique('org_user_unique').on(table.organizationId, table.userId),
     userOrgIdx: index('user_org_idx').on(table.userId, table.organizationId),
   })
 );
@@ -123,7 +123,7 @@ export const projectMemberships = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({
-    projectUserIdx: uniqueIndex('project_user_idx').on(table.projectId, table.userId),
+    projectUserUnique: unique('project_user_unique').on(table.projectId, table.userId),
     orgUserProjIdx: index('org_user_proj_idx').on(table.organizationId, table.userId),
   })
 );
@@ -148,7 +148,7 @@ export const workflowStatuses = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({
-    projStatusKeyIdx: uniqueIndex('proj_status_key_idx').on(table.projectId, table.key),
+    projStatusKeyUnique: unique('proj_status_key_unique').on(table.projectId, table.key),
     projStatusPosIdx: index('proj_status_pos_idx').on(table.projectId, table.position),
   })
 );
