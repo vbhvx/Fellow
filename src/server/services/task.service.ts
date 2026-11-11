@@ -1,4 +1,4 @@
-import { db } from '@/db/client';
+import { db, Transaction } from '@/db/client';
 import {
   tasks,
   workflowStatuses,
@@ -9,7 +9,12 @@ import {
 } from '@/db/schema';
 import { ProjectService } from './project.service';
 import { permissions } from '@/server/authorization/permissions';
-import { computePosition, rebalancePositions } from '@/server/ordering/fractional-index';
+import {
+  computePosition,
+  rebalancePositions,
+  INITIAL_POSITION,
+  POSITION_STEP,
+} from '@/server/ordering/fractional-index';
 import { recordOutboxEvent, publishEvent } from '@/server/events/outbox';
 import {
   BadRequestError,
@@ -19,6 +24,11 @@ import {
 } from '@/server/errors/app-error';
 import { eq, and, sql, desc, asc } from 'drizzle-orm';
 import crypto from 'crypto';
+
+// Row lock on the workflow status acts as a per-column mutex for ordering writes.
+async function lockColumn(tx: Transaction, statusId: string) {
+  await tx.select({ id: workflowStatuses.id }).from(workflowStatuses).where(eq(workflowStatuses.id, statusId)).for('update');
+}
 
 export class TaskService {
   static async getProjectTasks(
@@ -148,22 +158,24 @@ export class TaskService {
       }
     }
 
-    let pos = data.position;
-    if (pos === undefined) {
-      // Put at end of column
-      const existing = await db
-        .select({ position: tasks.position })
-        .from(tasks)
-        .where(and(eq(tasks.statusId, data.statusId), sql`${tasks.deletedAt} IS NULL`))
-        .orderBy(desc(tasks.position))
-        .limit(1);
-
-      pos = existing.length > 0 ? existing[0].position + 1000.0 : 1000.0;
-    }
-
     const taskId = `task_${crypto.randomUUID()}`;
 
     const { createdTask, envelope } = await db.transaction(async (tx) => {
+      await lockColumn(tx, data.statusId);
+
+      let pos = data.position;
+      if (pos === undefined) {
+        // Put at end of column. Read under the column lock so concurrent creates never collide.
+        const existing = await tx
+          .select({ position: tasks.position })
+          .from(tasks)
+          .where(and(eq(tasks.statusId, data.statusId), sql`${tasks.deletedAt} IS NULL`))
+          .orderBy(desc(tasks.position))
+          .limit(1);
+
+        pos = existing.length > 0 ? existing[0].position + POSITION_STEP : INITIAL_POSITION;
+      }
+
       const [t] = await tx
         .insert(tasks)
         .values({
@@ -430,37 +442,59 @@ export class TaskService {
       throw new BadRequestError('Destination status does not belong to the target project');
     }
 
-    // Retrieve neighbor positions
-    let prevPos: number | null = null;
-    let nextPos: number | null = null;
-
-    if (moveData.prevTaskId) {
-      const [prevTask] = await db
-        .select({ id: tasks.id, position: tasks.position, statusId: tasks.statusId, projectId: tasks.projectId })
-        .from(tasks)
-        .where(eq(tasks.id, moveData.prevTaskId))
-        .limit(1);
-
-      if (prevTask && prevTask.statusId === moveData.statusId && prevTask.projectId === targetProjectId) {
-        prevPos = prevTask.position;
-      }
-    }
-
-    if (moveData.nextTaskId) {
-      const [nextTask] = await db
-        .select({ id: tasks.id, position: tasks.position, statusId: tasks.statusId, projectId: tasks.projectId })
-        .from(tasks)
-        .where(eq(tasks.id, moveData.nextTaskId))
-        .limit(1);
-
-      if (nextTask && nextTask.statusId === moveData.statusId && nextTask.projectId === targetProjectId) {
-        nextPos = nextTask.position;
-      }
-    }
-
-    const { position: computedPos, needsRebalance } = computePosition(prevPos, nextPos);
-
     const { updatedTask, envelope } = await db.transaction(async (tx) => {
+      // Serialize writers to the destination column so neighbour positions cannot shift
+      // between reading them and writing the computed position.
+      await lockColumn(tx, moveData.statusId);
+
+      // Retrieve neighbor positions
+      let prevPos: number | null = null;
+      let nextPos: number | null = null;
+
+      if (moveData.prevTaskId) {
+        const [prevTask] = await tx
+          .select({ id: tasks.id, position: tasks.position, statusId: tasks.statusId, projectId: tasks.projectId })
+          .from(tasks)
+          .where(eq(tasks.id, moveData.prevTaskId))
+          .limit(1);
+
+        if (prevTask && prevTask.statusId === moveData.statusId && prevTask.projectId === targetProjectId) {
+          prevPos = prevTask.position;
+        }
+      }
+
+      if (moveData.nextTaskId) {
+        const [nextTask] = await tx
+          .select({ id: tasks.id, position: tasks.position, statusId: tasks.statusId, projectId: tasks.projectId })
+          .from(tasks)
+          .where(eq(tasks.id, moveData.nextTaskId))
+          .limit(1);
+
+        if (nextTask && nextTask.statusId === moveData.statusId && nextTask.projectId === targetProjectId) {
+          nextPos = nextTask.position;
+        }
+      }
+
+      // No neighbours given (e.g. dropped onto a column header): append to the end of the column.
+      if (!moveData.prevTaskId && !moveData.nextTaskId) {
+        const [last] = await tx
+          .select({ position: tasks.position })
+          .from(tasks)
+          .where(
+            and(
+              eq(tasks.projectId, targetProjectId),
+              eq(tasks.statusId, moveData.statusId),
+              sql`${tasks.id} != ${taskId}`,
+              sql`${tasks.deletedAt} IS NULL`
+            )
+          )
+          .orderBy(desc(tasks.position))
+          .limit(1);
+        prevPos = last?.position ?? null;
+      }
+
+      const { position: computedPos, needsRebalance } = computePosition(prevPos, nextPos);
+
       let finalPosition = computedPos;
 
       // Handle rebalancing if spacing is compressed
