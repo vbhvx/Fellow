@@ -63,3 +63,22 @@ To prevent stale client snapshots from overwriting moves:
 - If another user modified the task (status, description, priority, or position) concurrently, the server detects that `task.version !== expectedVersion` and rejects the operation with `409 Conflict`.
 - The frontend catches this conflict, rolls back the optimistic drag movement, and re-synchronizes the column with canonical server data.
 
+
+## Concurrent Writers to the Same Column
+
+Optimistic versioning protects a **single task** from stale writes. It doesn't stop two different tasks from being written into the **same gap** at the same time. Without further coordination:
+
+- two concurrent "create at end of column" requests both read `max(position) = 3000` and both write `4000`;
+- two users who drop different cards between X and Y at the same moment both compute `(X + Y) / 2`.
+
+Both produce duplicate positions, so the column order becomes undefined.
+
+**Fix: a per-column lock plus server-derived neighbours.** Inside the create/move transaction:
+
+1. `SELECT … FROM workflow_statuses WHERE id = :destination FOR UPDATE` takes a row lock that serializes ordering writes into that column only. Writes to other columns and other projects don't contend.
+2. Under the lock, the server re-derives the real gap from committed state. The client's `prevTaskId` anchors the drop, and the server reads the actual successor of that task. (If only `nextTaskId` is given, it reads the actual predecessor instead.) With no usable neighbours, the task is appended after the current last task.
+3. The position is computed and written, and the lock is released at commit.
+
+The second of two simultaneous drops therefore sees the first card already in the gap and lands between them, so both cards end up in the slot with distinct positions. `tests/concurrency/ordering.test.ts` covers parallel creates, parallel appends, and the same-slot race. All three fail if the lock is removed.
+
+As a last line of defence, list queries order by `(position, id)`, so even a hypothetical tie renders deterministically.
