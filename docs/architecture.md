@@ -33,10 +33,13 @@ Commit Transaction
        │
        ├──────────────────────────────┬──────────────────────────────┐
        ▼                              ▼                              ▼
-In-Memory Event Broker         Background Outbox Worker        Database-Backed Notifications
-       │                              │                              │
-       ▼                              ▼                              ▼
-Authorized SSE Subscribers     Retry / Publication Recovery   Filtered by current permissions
+Immediate relay (request)      Outbox worker(s): retry,        Database-Backed Notifications
+claim row + pg_notify          backoff, dead-letter            Filtered by current permissions
+       └──────────────┬───────────────┘
+                      ▼
+      Postgres LISTEN on every web instance
+                      ▼
+      Per-instance broker → authorized SSE subscribers (Last-Event-ID replay on reconnect)
 ```
 
 ## Architectural Layers
@@ -61,8 +64,9 @@ Authorized SSE Subscribers     Retry / Publication Recovery   Filtered by curren
 ### 4. Transactional Durable Outbox
 - Whenever a task, status, or comment is created, updated, or moved, the corresponding `collaboration_event` is written within the exact same database transaction.
 - If the database mutation succeeds, the event is guaranteed to exist.
-- An in-process event broker immediately broadcasts the committed event to active authorized SSE connections.
-- A background worker (`workers/outbox/worker.ts`) continuously monitors for un-published events (e.g. if a process crashed before socket broadcast) and ensures reliable delivery.
+- Right after commit, the request relays the event: it claims the row and emits `pg_notify` in a single transaction. Every web instance `LISTEN`s and fans the event out to its own SSE connections, so realtime works across any number of instances.
+- Outbox workers (`workers/outbox/worker.ts`) relay anything the request path missed, for example after a crash or a frozen serverless function. They use `FOR UPDATE SKIP LOCKED`, exponential backoff, and a dead-letter state. Several workers can run safely at once.
+- See [realtime-events.md](./realtime-events.md) for the full delivery guarantees.
 
 ### 5. Real-Time Transport (Server-Sent Events)
 - Authenticated SSE endpoint: `/api/v1/realtime/stream?organizationId=...`.
