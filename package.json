@@ -6,8 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
-    "db:generate": "drizzle-kit generate",
+    "lint": "next lint --dir src --dir tests --dir workers",
+    "typecheck": "tsc --noEmit",
+    "verify": "npm run typecheck && npm run lint && npm test",
     "db:migrate": "tsx src/db/migrate.ts",
     "db:seed": "tsx src/db/seed.ts",
     "test": "vitest run",
@@ -15,8 +16,9 @@
     "test:coverage": "vitest run --coverage",
     "test:security": "vitest run tests/security",
     "test:concurrency": "vitest run tests/concurrency",
-    "test:e2e": "playwright test",
-    "worker:outbox": "tsx workers/outbox/worker.ts"
+    "test:realtime": "vitest run tests/realtime",
+    "worker:outbox": "tsx workers/outbox/worker.ts",
+    "docker:up": "docker compose up --build"
   },
   "dependencies": {
     "@hello-pangea/dnd": "^18.0.1",
@@ -44,11 +46,15 @@
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "autoprefixer": "^10.6.2",
-    "drizzle-kit": "^0.31.11",
+    "eslint": "^8.57.1",
+    "eslint-config-next": "^14.2.35",
     "postcss": "^8.5.32",
     "tailwindcss": "^3.4.17",
     "tsx": "^4.23.15",
     "typescript": "^5.6.3",
     "vitest": "^5.0.5"
+  },
+  "engines": {
+    "node": ">=20.11"
   }
 }

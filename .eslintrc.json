@@ -1,0 +1,15 @@
+{
+  "root": true,
+  "extends": ["next/core-web-vitals"],
+  "rules": {
+    "no-console": ["warn", { "allow": ["warn", "error"] }],
+    "prefer-const": "error",
+    "eqeqeq": ["error", "smart"]
+  },
+  "overrides": [
+    {
+      "files": ["src/server/observability/logger.ts", "src/db/seed.ts", "src/db/migrate.ts", "tests/**"],
+      "rules": { "no-console": "off" }
+    }
+  ]
+}
