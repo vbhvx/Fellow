@@ -1,7 +1,7 @@
 import bcrypt from 'bcryptjs';
 import { SignJWT, jwtVerify } from 'jose';
 import { cookies } from 'next/headers';
-import { NextRequest } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 
 const DEV_FALLBACK_SECRET = 'super_secret_production_ready_fellow_platform_signing_key_2026';
 
@@ -18,6 +18,18 @@ function getSigningSecret(): Uint8Array {
 }
 
 export const COOKIE_NAME = 'fellow_session';
+export const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
+const BCRYPT_COST = 12;
+
+export function setSessionCookie(response: NextResponse, token: string) {
+  response.cookies.set(COOKIE_NAME, token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    path: '/',
+    maxAge: SESSION_TTL_SECONDS,
+  });
+}
 
 export interface SessionPayload {
   userId: string;
@@ -26,7 +38,7 @@ export interface SessionPayload {
 }
 
 export async function hashPassword(password: string): Promise<string> {
-  const salt = await bcrypt.genSalt(10);
+  const salt = await bcrypt.genSalt(BCRYPT_COST);
   return bcrypt.hash(password, salt);
 }
 
@@ -38,7 +50,7 @@ export async function createSessionToken(payload: SessionPayload): Promise<strin
   return new SignJWT({ ...payload })
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
-    .setExpirationTime('7d')
+    .setExpirationTime(`${SESSION_TTL_SECONDS}s`)
     .sign(getSigningSecret());
 }
 
