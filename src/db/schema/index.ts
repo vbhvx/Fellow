@@ -9,6 +9,7 @@ import {
   jsonb,
   bigserial,
   index,
+  primaryKey,
   unique,
 } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
@@ -294,3 +295,64 @@ export const collaborationEvents = pgTable(
   })
 );
 
+// 13. Rate limit counters (fixed window, shared across instances)
+export const rateLimits = pgTable(
+  'rate_limits',
+  {
+    key: varchar('key', { length: 255 }).notNull(),
+    windowStart: timestamp('window_start', { withTimezone: true }).notNull(),
+    count: integer('count').default(0).notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.key, table.windowStart] }),
+  })
+);
+
+// Relations
+export const usersRelations = relations(users, ({ many }) => ({
+  memberships: many(organizationMemberships),
+  projectMemberships: many(projectMemberships),
+  createdTasks: many(tasks, { relationName: 'taskCreator' }),
+  assignedTasks: many(tasks, { relationName: 'taskAssignee' }),
+  comments: many(taskComments),
+  notifications: many(notifications),
+}));
+
+export const organizationsRelations = relations(organizations, ({ many }) => ({
+  memberships: many(organizationMemberships),
+  invitations: many(organizationInvitations),
+  projects: many(projects),
+}));
+
+export const projectsRelations = relations(projects, ({ one, many }) => ({
+  organization: one(organizations, {
+    fields: [projects.organizationId],
+    references: [organizations.id],
+  }),
+  memberships: many(projectMemberships),
+  workflowStatuses: many(workflowStatuses),
+  tasks: many(tasks),
+}));
+
+export const tasksRelations = relations(tasks, ({ one, many }) => ({
+  project: one(projects, {
+    fields: [tasks.projectId],
+    references: [projects.id],
+  }),
+  status: one(workflowStatuses, {
+    fields: [tasks.statusId],
+    references: [workflowStatuses.id],
+  }),
+  creator: one(users, {
+    fields: [tasks.createdBy],
+    references: [users.id],
+    relationName: 'taskCreator',
+  }),
+  assignee: one(users, {
+    fields: [tasks.assigneeId],
+    references: [users.id],
+    relationName: 'taskAssignee',
+  }),
+  comments: many(taskComments),
+  activities: many(taskActivities),
+}));
