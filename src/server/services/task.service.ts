@@ -227,7 +227,7 @@ export class TaskService {
     });
 
     // Asynchronously dispatch live event
-    publishEvent(envelope);
+    await publishEvent(envelope);
 
     return createdTask;
   }
@@ -378,7 +378,7 @@ export class TaskService {
       return { updatedTask: updated, envelope: env };
     });
 
-    publishEvent(envelope);
+    await publishEvent(envelope);
     return updatedTask;
   }
 
@@ -562,7 +562,7 @@ export class TaskService {
       return { updatedTask: updated, envelope: env };
     });
 
-    publishEvent(envelope);
+    await publishEvent(envelope);
     return updatedTask;
   }
 
@@ -607,7 +607,7 @@ export class TaskService {
       return { envelope: env };
     });
 
-    publishEvent(envelope);
+    await publishEvent(envelope);
     return { success: true };
   }
 

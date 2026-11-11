@@ -95,7 +95,7 @@ export class CommentService {
       return { newComment: comment, envelope: env };
     });
 
-    publishEvent(envelope);
+    await publishEvent(envelope);
 
     const [author] = await db.select({ name: users.name, email: users.email }).from(users).where(eq(users.id, userId)).limit(1);
 
