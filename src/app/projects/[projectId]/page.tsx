@@ -133,7 +133,12 @@ function ProjectBoardContent() {
         });
       } else if (event.type === 'task.updated' || event.type === 'task.moved') {
         const updated = event.payload.task as TaskItem;
-        setTasks((prev) => prev.map((t) => (t.id === updated.id ? { ...t, ...updated } : t)));
+        // Events can arrive out of order (e.g. replay after reconnect); never regress to an older version.
+        setTasks((prev) =>
+          prev.map((t) =>
+            t.id === updated.id && (updated.version ?? 0) >= (t.version ?? 0) ? { ...t, ...updated } : t
+          )
+        );
       } else if (event.type === 'task.deleted') {
         const delId = event.payload.taskId;
         setTasks((prev) => prev.filter((t) => t.id !== delId));
@@ -142,7 +147,7 @@ function ProjectBoardContent() {
     [projectId]
   );
 
-  const { status: realtimeStatus } = useRealtime(project?.organizationId, handleRealtimeEvent);
+  const { status: realtimeStatus } = useRealtime(project?.organizationId, handleRealtimeEvent, loadProjectData);
 
   // Drag and drop handler with optimistic UI updates
   const handleDragEnd = async (result: DropResult) => {
