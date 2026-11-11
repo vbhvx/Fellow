@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   X,
   Calendar,
@@ -53,7 +53,7 @@ export function TaskModal({
   const [newComment, setNewComment] = useState('');
   const [activities, setActivities] = useState<any[]>([]);
 
-  const loadTask = async () => {
+  const loadTask = useCallback(async () => {
     setLoading(true);
     setError(null);
     setConflictError(null);
@@ -80,11 +80,11 @@ export function TaskModal({
     } finally {
       setLoading(false);
     }
-  };
+  }, [taskId]);
 
   useEffect(() => {
     loadTask();
-  }, [taskId]);
+  }, [loadTask]);
 
   const handleSave = async () => {
     setSaving(true);

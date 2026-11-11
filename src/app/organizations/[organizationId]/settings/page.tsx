@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -44,7 +44,7 @@ export default function OrganizationSettingsPage() {
   const [generatedToken, setGeneratedToken] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -59,11 +59,11 @@ export default function OrganizationSettingsPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [organizationId]);
 
   useEffect(() => {
     loadData();
-  }, [organizationId]);
+  }, [loadData]);
 
   const handleInvite = async (e: React.FormEvent) => {
     e.preventDefault();
