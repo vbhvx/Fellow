@@ -3,6 +3,7 @@ import { AuthService } from '@/server/services/auth.service';
 import { registerSchema } from '@/server/validation/schemas';
 import { formatErrorResponse, ValidationError } from '@/server/errors/app-error';
 import { setSessionCookie } from '@/server/auth/session';
+import { clientIp, enforceRateLimit, RATE_LIMITS } from '@/server/security/rate-limit';
 
 export async function POST(req: NextRequest) {
   try {
@@ -11,6 +12,8 @@ export async function POST(req: NextRequest) {
     if (!result.success) {
       throw new ValidationError('Invalid registration input', result.error.flatten().fieldErrors);
     }
+
+    await enforceRateLimit(RATE_LIMITS.registerPerIp, clientIp(req));
 
     const { user, token } = await AuthService.register(result.data);
 

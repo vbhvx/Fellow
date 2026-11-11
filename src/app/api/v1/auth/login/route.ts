@@ -3,6 +3,7 @@ import { AuthService } from '@/server/services/auth.service';
 import { loginSchema } from '@/server/validation/schemas';
 import { formatErrorResponse, ValidationError } from '@/server/errors/app-error';
 import { setSessionCookie } from '@/server/auth/session';
+import { clientIp, enforceRateLimit, RATE_LIMITS } from '@/server/security/rate-limit';
 
 export async function POST(req: NextRequest) {
   try {
@@ -11,6 +12,9 @@ export async function POST(req: NextRequest) {
     if (!result.success) {
       throw new ValidationError('Invalid login credentials', result.error.flatten().fieldErrors);
     }
+
+    await enforceRateLimit(RATE_LIMITS.loginPerIp, clientIp(req));
+    await enforceRateLimit(RATE_LIMITS.loginPerAccount, result.data.email.toLowerCase());
 
     const { user, token } = await AuthService.login(result.data);
 
