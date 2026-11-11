@@ -3,9 +3,19 @@ import { SignJWT, jwtVerify } from 'jose';
 import { cookies } from 'next/headers';
 import { NextRequest } from 'next/server';
 
-const JWT_SECRET = new TextEncoder().encode(
-  process.env.JWT_SECRET || 'super_secret_production_ready_fellow_platform_signing_key_2026'
-);
+const DEV_FALLBACK_SECRET = 'super_secret_production_ready_fellow_platform_signing_key_2026';
+
+// The fallback only applies outside production (local dev and tests).
+function getSigningSecret(): Uint8Array {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('JWT_SECRET must be set in production');
+    }
+    return new TextEncoder().encode(DEV_FALLBACK_SECRET);
+  }
+  return new TextEncoder().encode(secret);
+}
 
 export const COOKIE_NAME = 'fellow_session';
 
@@ -29,12 +39,12 @@ export async function createSessionToken(payload: SessionPayload): Promise<strin
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
     .setExpirationTime('7d')
-    .sign(JWT_SECRET);
+    .sign(getSigningSecret());
 }
 
 export async function verifySessionToken(token: string): Promise<SessionPayload | null> {
   try {
-    const { payload } = await jwtVerify(token, JWT_SECRET);
+    const { payload } = await jwtVerify(token, getSigningSecret());
     return {
       userId: payload.userId as string,
       email: payload.email as string,
