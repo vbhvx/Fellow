@@ -24,7 +24,7 @@ export async function POST(
 
     return NextResponse.json({ invitation, token }, { status: 201 });
   } catch (error) {
-    return formatErrorResponse(error);
+    return formatErrorResponse(error, req);
   }
 }
 

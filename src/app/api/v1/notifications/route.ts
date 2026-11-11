@@ -13,6 +13,6 @@ export async function GET(req: NextRequest) {
     const notifs = await NotificationService.getUserNotifications(session.userId, orgId);
     return NextResponse.json({ notifications: notifs });
   } catch (error) {
-    return formatErrorResponse(error);
+    return formatErrorResponse(error, req);
   }
 }

@@ -13,7 +13,7 @@ export async function GET(
     const project = await ProjectService.getProjectById(session.userId, params.projectId);
     return NextResponse.json({ project });
   } catch (error) {
-    return formatErrorResponse(error);
+    return formatErrorResponse(error, req);
   }
 }
 
@@ -32,7 +32,7 @@ export async function PATCH(
     const updated = await ProjectService.updateProject(session.userId, params.projectId, result.data);
     return NextResponse.json({ project: updated });
   } catch (error) {
-    return formatErrorResponse(error);
+    return formatErrorResponse(error, req);
   }
 }
 
@@ -45,7 +45,7 @@ export async function DELETE(
     await ProjectService.updateProject(session.userId, params.projectId, { archived: true });
     return NextResponse.json({ success: true, message: 'Project archived successfully' });
   } catch (error) {
-    return formatErrorResponse(error);
+    return formatErrorResponse(error, req);
   }
 }
 

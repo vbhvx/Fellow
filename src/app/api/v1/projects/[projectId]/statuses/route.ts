@@ -13,7 +13,7 @@ export async function GET(
     const statuses = await WorkflowService.getProjectStatuses(session.userId, params.projectId);
     return NextResponse.json({ statuses });
   } catch (error) {
-    return formatErrorResponse(error);
+    return formatErrorResponse(error, req);
   }
 }
 
@@ -32,7 +32,7 @@ export async function POST(
     const status = await WorkflowService.createWorkflowStatus(session.userId, params.projectId, result.data);
     return NextResponse.json({ status }, { status: 201 });
   } catch (error) {
-    return formatErrorResponse(error);
+    return formatErrorResponse(error, req);
   }
 }
 

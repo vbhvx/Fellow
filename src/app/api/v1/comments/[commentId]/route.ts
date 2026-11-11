@@ -19,7 +19,7 @@ export async function PATCH(
     const updated = await CommentService.updateComment(session.userId, params.commentId, result.data.content);
     return NextResponse.json({ comment: updated });
   } catch (error) {
-    return formatErrorResponse(error);
+    return formatErrorResponse(error, req);
   }
 }
 
@@ -32,7 +32,7 @@ export async function DELETE(
     await CommentService.deleteComment(session.userId, params.commentId);
     return NextResponse.json({ success: true, message: 'Comment deleted successfully' });
   } catch (error) {
-    return formatErrorResponse(error);
+    return formatErrorResponse(error, req);
   }
 }
 

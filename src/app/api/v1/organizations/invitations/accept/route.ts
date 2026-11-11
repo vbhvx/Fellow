@@ -16,7 +16,7 @@ export async function POST(req: NextRequest) {
     const membership = await OrganizationService.acceptInvitation(session.userId, result.data.token);
     return NextResponse.json({ success: true, membership });
   } catch (error) {
-    return formatErrorResponse(error);
+    return formatErrorResponse(error, req);
   }
 }
 

@@ -24,7 +24,7 @@ export async function GET(
     });
     return NextResponse.json({ tasks: taskList });
   } catch (error) {
-    return formatErrorResponse(error);
+    return formatErrorResponse(error, req);
   }
 }
 
@@ -43,6 +43,6 @@ export async function POST(
     const task = await TaskService.createTask(session.userId, params.projectId, result.data);
     return NextResponse.json({ task }, { status: 201 });
   } catch (error) {
-    return formatErrorResponse(error);
+    return formatErrorResponse(error, req);
   }
 }

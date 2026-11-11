@@ -19,7 +19,7 @@ export async function POST(
     const movedTask = await TaskService.moveTask(session.userId, params.taskId, result.data);
     return NextResponse.json({ task: movedTask });
   } catch (error) {
-    return formatErrorResponse(error);
+    return formatErrorResponse(error, req);
   }
 }
 

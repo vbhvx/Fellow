@@ -13,7 +13,7 @@ export async function GET(
     const org = await OrganizationService.getOrganizationById(session.userId, params.organizationId);
     return NextResponse.json({ organization: org });
   } catch (error) {
-    return formatErrorResponse(error);
+    return formatErrorResponse(error, req);
   }
 }
 
@@ -36,7 +36,7 @@ export async function PATCH(
     );
     return NextResponse.json({ organization: updated });
   } catch (error) {
-    return formatErrorResponse(error);
+    return formatErrorResponse(error, req);
   }
 }
 

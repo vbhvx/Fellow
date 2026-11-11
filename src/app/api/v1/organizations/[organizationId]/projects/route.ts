@@ -15,7 +15,7 @@ export async function GET(
     const accessible = await ProjectService.getAccessibleProjects(session.userId, params.organizationId);
     return NextResponse.json({ projects: accessible });
   } catch (error) {
-    return formatErrorResponse(error);
+    return formatErrorResponse(error, req);
   }
 }
 
@@ -34,6 +34,6 @@ export async function POST(
     const project = await ProjectService.createProject(session.userId, params.organizationId, result.data);
     return NextResponse.json({ project }, { status: 201 });
   } catch (error) {
-    return formatErrorResponse(error);
+    return formatErrorResponse(error, req);
   }
 }

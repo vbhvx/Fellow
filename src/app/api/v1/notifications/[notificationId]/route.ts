@@ -12,7 +12,7 @@ export async function PATCH(
     const updated = await NotificationService.markAsRead(session.userId, params.notificationId);
     return NextResponse.json({ notification: updated });
   } catch (error) {
-    return formatErrorResponse(error);
+    return formatErrorResponse(error, req);
   }
 }
 

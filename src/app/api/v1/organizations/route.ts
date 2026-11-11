@@ -12,7 +12,7 @@ export async function GET(req: NextRequest) {
     const orgs = await OrganizationService.getUserOrganizations(session.userId);
     return NextResponse.json({ organizations: orgs });
   } catch (error) {
-    return formatErrorResponse(error);
+    return formatErrorResponse(error, req);
   }
 }
 
@@ -28,6 +28,6 @@ export async function POST(req: NextRequest) {
     const org = await OrganizationService.createOrganization(session.userId, result.data);
     return NextResponse.json({ organization: org }, { status: 201 });
   } catch (error) {
-    return formatErrorResponse(error);
+    return formatErrorResponse(error, req);
   }
 }

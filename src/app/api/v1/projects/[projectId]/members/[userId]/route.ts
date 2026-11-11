@@ -21,7 +21,7 @@ export async function PUT(
     );
     return NextResponse.json({ member });
   } catch (error) {
-    return formatErrorResponse(error);
+    return formatErrorResponse(error, req);
   }
 }
 
@@ -34,7 +34,7 @@ export async function DELETE(
     await ProjectService.removeProjectMember(session.userId, params.projectId, params.userId);
     return NextResponse.json({ success: true, message: 'Member removed from project' });
   } catch (error) {
-    return formatErrorResponse(error);
+    return formatErrorResponse(error, req);
   }
 }
 

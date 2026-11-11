@@ -1,4 +1,5 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
+import { logger } from '@/server/observability/logger';
 
 export type ErrorCode =
   | 'UNAUTHORIZED'
@@ -7,6 +8,7 @@ export type ErrorCode =
   | 'CONFLICT'
   | 'VALIDATION_ERROR'
   | 'BAD_REQUEST'
+  | 'RATE_LIMITED'
   | 'INTERNAL_SERVER_ERROR';
 
 export class AppError extends Error {
@@ -59,10 +61,30 @@ export class BadRequestError extends AppError {
   }
 }
 
-export function formatErrorResponse(error: unknown, reqId?: string) {
-  const requestId = reqId || `req_${Math.random().toString(36).substring(2, 10)}`;
+export const REQUEST_ID_HEADER = 'x-request-id';
+
+export function requestIdOf(req?: NextRequest | string): string {
+  if (typeof req === 'string') return req;
+  return req?.headers.get(REQUEST_ID_HEADER) || `req_${crypto.randomUUID()}`;
+}
+
+export function formatErrorResponse(error: unknown, req?: NextRequest | string) {
+  const requestId = requestIdOf(req);
+  const headers: Record<string, string> = { [REQUEST_ID_HEADER]: requestId };
+
+  // `await req.json()` on a malformed body is a client error, not a server fault.
+  if (error instanceof SyntaxError) {
+    error = new BadRequestError('Request body must be valid JSON');
+  }
 
   if (error instanceof AppError) {
+    if (error.code === 'RATE_LIMITED') {
+      const retryAfter = (error.details as { retryAfterSeconds?: number } | undefined)?.retryAfterSeconds;
+      if (retryAfter) headers['retry-after'] = String(retryAfter);
+    }
+    if (error.statusCode >= 500) {
+      logger.error('request failed', { requestId, code: error.code, err: error });
+    }
     return NextResponse.json(
       {
         error: {
@@ -72,11 +94,16 @@ export function formatErrorResponse(error: unknown, reqId?: string) {
           ...(error.details ? { details: error.details } : {}),
         },
       },
-      { status: error.statusCode }
+      { status: error.statusCode, headers }
     );
   }
 
-  console.error(`[${requestId}] Unhandled Server Error:`, error);
+  logger.error('unhandled server error', {
+    requestId,
+    method: typeof req === 'object' ? req.method : undefined,
+    path: typeof req === 'object' ? req.nextUrl.pathname : undefined,
+    err: error,
+  });
   return NextResponse.json(
     {
       error: {
@@ -85,7 +112,6 @@ export function formatErrorResponse(error: unknown, reqId?: string) {
         requestId,
       },
     },
-    { status: 500 }
+    { status: 500, headers }
   );
 }
-

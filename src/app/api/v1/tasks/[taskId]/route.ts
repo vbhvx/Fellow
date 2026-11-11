@@ -13,7 +13,7 @@ export async function GET(
     const task = await TaskService.getTaskById(session.userId, params.taskId);
     return NextResponse.json({ task });
   } catch (error) {
-    return formatErrorResponse(error);
+    return formatErrorResponse(error, req);
   }
 }
 
@@ -32,7 +32,7 @@ export async function PATCH(
     const updated = await TaskService.updateTask(session.userId, params.taskId, result.data);
     return NextResponse.json({ task: updated });
   } catch (error) {
-    return formatErrorResponse(error);
+    return formatErrorResponse(error, req);
   }
 }
 
@@ -45,7 +45,7 @@ export async function DELETE(
     await TaskService.deleteTask(session.userId, params.taskId);
     return NextResponse.json({ success: true, message: 'Task deleted successfully' });
   } catch (error) {
-    return formatErrorResponse(error);
+    return formatErrorResponse(error, req);
   }
 }
 

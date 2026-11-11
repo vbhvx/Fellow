@@ -12,7 +12,7 @@ export async function GET(
     const activities = await TaskService.getTaskActivity(session.userId, params.taskId);
     return NextResponse.json({ activities });
   } catch (error) {
-    return formatErrorResponse(error);
+    return formatErrorResponse(error, req);
   }
 }
 

@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
 
     return response;
   } catch (error) {
-    return formatErrorResponse(error);
+    return formatErrorResponse(error, req);
   }
 }
 

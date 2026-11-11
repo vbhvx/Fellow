@@ -13,7 +13,7 @@ export async function GET(
     const comments = await CommentService.getTaskComments(session.userId, params.taskId);
     return NextResponse.json({ comments });
   } catch (error) {
-    return formatErrorResponse(error);
+    return formatErrorResponse(error, req);
   }
 }
 
@@ -32,7 +32,7 @@ export async function POST(
     const comment = await CommentService.createComment(session.userId, params.taskId, result.data.content);
     return NextResponse.json({ comment }, { status: 201 });
   } catch (error) {
-    return formatErrorResponse(error);
+    return formatErrorResponse(error, req);
   }
 }
 

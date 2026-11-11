@@ -11,6 +11,6 @@ export async function GET(req: NextRequest) {
     const user = await AuthService.getUserById(session.userId);
     return NextResponse.json({ user });
   } catch (error) {
-    return formatErrorResponse(error);
+    return formatErrorResponse(error, req);
   }
 }

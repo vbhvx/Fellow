@@ -12,7 +12,7 @@ export async function GET(
     const members = await OrganizationService.getOrganizationMembers(session.userId, params.organizationId);
     return NextResponse.json({ members });
   } catch (error) {
-    return formatErrorResponse(error);
+    return formatErrorResponse(error, req);
   }
 }
 

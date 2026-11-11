@@ -12,7 +12,7 @@ export async function DELETE(
     await OrganizationService.removeMember(session.userId, params.organizationId, params.userId);
     return NextResponse.json({ success: true, message: 'Member removed successfully' });
   } catch (error) {
-    return formatErrorResponse(error);
+    return formatErrorResponse(error, req);
   }
 }
 

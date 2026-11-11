@@ -12,7 +12,7 @@ export async function POST(req: NextRequest) {
     await NotificationService.markAllAsRead(session.userId, organizationId);
     return NextResponse.json({ success: true });
   } catch (error) {
-    return formatErrorResponse(error);
+    return formatErrorResponse(error, req);
   }
 }
 
