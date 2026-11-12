@@ -36,3 +36,7 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
+
+# design skill: restore the kit with `npx skills experimental_install` (skills-lock.json)
+/.claude/skills/
+/.taste-skill/
