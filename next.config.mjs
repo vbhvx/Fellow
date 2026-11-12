@@ -11,9 +11,10 @@ const isDev = process.env.NODE_ENV !== 'production';
 const contentSecurityPolicy = [
   "default-src 'self'",
   `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ''}`,
-  "style-src 'self' 'unsafe-inline'",
+  // Google Fonts serve the landing page's faces (public/landing.html).
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "img-src 'self' data: blob:",
-  "font-src 'self' data:",
+  "font-src 'self' data: https://fonts.gstatic.com",
   "connect-src 'self'",
   "frame-ancestors 'none'",
   "base-uri 'self'",
@@ -50,6 +51,15 @@ const nextConfig = {
     outputFileTracingIncludes: {
       '/api/v1/openapi.json': ['./docs/openapi.yaml'],
     },
+  },
+  async rewrites() {
+    return {
+      // Signed-out visitors get the static landing page at "/"; with a session cookie, the
+      // page route still redirects to the dashboard (or to /login when the session expired).
+      beforeFiles: [
+        { source: '/', missing: [{ type: 'cookie', key: 'fellow_session' }], destination: '/landing.html' },
+      ],
+    };
   },
   async headers() {
     return [{ source: '/:path*', headers: securityHeaders }];
