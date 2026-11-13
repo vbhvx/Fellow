@@ -4,7 +4,8 @@ import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Building2, ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
-import { apiRequest } from '@/lib/api-client';
+import { errorMessage } from '@/lib/api/client';
+import { organizationsApi } from '@/lib/api/endpoints';
 
 export default function NewOrganizationPage() {
   const router = useRouter();
@@ -20,17 +21,10 @@ export default function NewOrganizationPage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await apiRequest('/api/v1/organizations', {
-        method: 'POST',
-        body: JSON.stringify({
-          name: name.trim(),
-          slug: slug.trim() || undefined,
-        }),
-      });
-
-      router.push(`/dashboard?org=${res.organization.id}`);
-    } catch (err: any) {
-      setError(err.message || 'Failed to create organization');
+      const organization = await organizationsApi.create({ name: name.trim(), slug: slug.trim() || undefined });
+      router.push(`/dashboard?org=${organization.id}`);
+    } catch (err) {
+      setError(errorMessage(err, 'Failed to create organization'));
     } finally {
       setLoading(false);
     }

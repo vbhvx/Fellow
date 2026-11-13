@@ -83,7 +83,7 @@ export class ProjectService {
           projectId: proj.id,
           name: st.name,
           key: st.key,
-          category: st.category as any,
+          category: st.category,
           position: st.pos,
           isDefault: st.isDefault,
         });

@@ -1,38 +1,21 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import {
-  ArrowLeft,
-  Building2,
-  Users,
-  UserPlus,
-  Shield,
-  Trash2,
-  Copy,
-  Check,
-  AlertCircle,
-} from 'lucide-react';
+import { ArrowLeft, Building2, Users, UserPlus, Trash2, Copy, Check } from 'lucide-react';
 import { Navbar } from '@/components/Navbar';
-import { apiRequest } from '@/lib/api-client';
-
-interface Member {
-  id: string;
-  userId: string;
-  name: string;
-  email: string;
-  role: string;
-  joinedAt: string;
-}
+import { ErrorAlert } from '@/components/ErrorAlert';
+import { errorMessage } from '@/lib/api/client';
+import { organizationsApi } from '@/lib/api/endpoints';
+import type { OrganizationDetail, OrganizationMember } from '@/lib/api/types';
 
 export default function OrganizationSettingsPage() {
   const params = useParams();
-  const router = useRouter();
   const organizationId = params.organizationId as string;
 
-  const [org, setOrg] = useState<any>(null);
-  const [members, setMembers] = useState<Member[]>([]);
+  const [org, setOrg] = useState<OrganizationDetail | null>(null);
+  const [members, setMembers] = useState<OrganizationMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -44,25 +27,24 @@ export default function OrganizationSettingsPage() {
   const [generatedToken, setGeneratedToken] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
+  const canManage = org?.role === 'owner' || org?.role === 'admin';
+
   const loadData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [orgRes, memRes] = await Promise.all([
-        apiRequest(`/api/v1/organizations/${organizationId}`),
-        apiRequest(`/api/v1/organizations/${organizationId}/members`),
-      ]);
-      setOrg(orgRes.organization);
-      setMembers(memRes.members || []);
-    } catch (err: any) {
-      setError(err.message || 'Failed to load organization settings');
+      const [o, m] = await Promise.all([organizationsApi.get(organizationId), organizationsApi.members(organizationId)]);
+      setOrg(o);
+      setMembers(m);
+    } catch (err) {
+      setError(errorMessage(err, 'Failed to load organization settings'));
     } finally {
       setLoading(false);
     }
   }, [organizationId]);
 
   useEffect(() => {
-    loadData();
+    void loadData();
   }, [loadData]);
 
   const handleInvite = async (e: React.FormEvent) => {
@@ -72,19 +54,12 @@ export default function OrganizationSettingsPage() {
     setInviting(true);
     setError(null);
     try {
-      const res = await apiRequest(`/api/v1/organizations/${organizationId}/invitations`, {
-        method: 'POST',
-        body: JSON.stringify({
-          email: inviteEmail.trim(),
-          role: inviteRole,
-        }),
-      });
-
-      setGeneratedToken(res.token);
+      const { token } = await organizationsApi.invite(organizationId, { email: inviteEmail.trim(), role: inviteRole });
+      setGeneratedToken(token);
       setInviteEmail('');
       await loadData();
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err) {
+      setError(errorMessage(err));
     } finally {
       setInviting(false);
     }
@@ -92,22 +67,23 @@ export default function OrganizationSettingsPage() {
 
   const handleRemoveMember = async (userId: string, name: string) => {
     if (!confirm(`Are you sure you want to remove ${name} from this organization?`)) return;
-
     try {
-      await apiRequest(`/api/v1/organizations/${organizationId}/members/${userId}`, {
-        method: 'DELETE',
-      });
+      await organizationsApi.removeMember(organizationId, userId);
       await loadData();
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err) {
+      setError(errorMessage(err));
     }
   };
 
-  const copyToken = () => {
+  const copyToken = async () => {
     if (!generatedToken) return;
-    navigator.clipboard.writeText(generatedToken);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    try {
+      await navigator.clipboard.writeText(generatedToken);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard access can be refused (permissions, insecure context): the token stays visible to copy by hand.
+    }
   };
 
   return (
@@ -128,17 +104,7 @@ export default function OrganizationSettingsPage() {
           </div>
         </div>
 
-        {error && (
-          <div className="bg-rose-50 border border-rose-200 p-4 rounded-xl text-rose-700 text-xs font-medium flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
-              <span>{error}</span>
-            </div>
-            <button onClick={() => setError(null)} className="font-bold">
-              ✕
-            </button>
-          </div>
-        )}
+        {error && <ErrorAlert message={error} onDismiss={() => setError(null)} />}
 
         {/* Organization Overview Card */}
         <div className="bg-white p-6 rounded-2xl border border-slate-200/90 shadow-sm">
@@ -178,7 +144,7 @@ export default function OrganizationSettingsPage() {
                 Teammates can collaborate across projects permitted by role and visibility rules.
               </p>
             </div>
-            {['owner', 'admin'].includes(org?.role) && (
+            {canManage && (
               <button
                 onClick={() => {
                   setGeneratedToken(null);
@@ -192,6 +158,9 @@ export default function OrganizationSettingsPage() {
             )}
           </div>
 
+          {loading && members.length === 0 ? (
+            <div className="py-8 text-center text-xs text-slate-400">Loading members...</div>
+          ) : (
           <div className="divide-y divide-slate-100">
             {members.map((m) => (
               <div key={m.id} className="py-3.5 flex items-center justify-between text-xs">
@@ -220,9 +189,9 @@ export default function OrganizationSettingsPage() {
                     {m.role}
                   </span>
 
-                  {['owner', 'admin'].includes(org?.role) && m.role !== 'owner' && (
+                  {canManage && m.role !== 'owner' && (
                     <button
-                      onClick={() => handleRemoveMember(m.userId, m.name)}
+                      onClick={() => void handleRemoveMember(m.userId, m.name)}
                       className="p-1 text-slate-400 hover:text-rose-600 rounded transition-colors"
                       title="Remove Member"
                     >
@@ -233,6 +202,7 @@ export default function OrganizationSettingsPage() {
               </div>
             ))}
           </div>
+          )}
         </div>
       </main>
 
@@ -255,7 +225,7 @@ export default function OrganizationSettingsPage() {
                   <div className="flex items-center gap-2 bg-white p-2 rounded-lg border border-emerald-300">
                     <span className="font-mono text-[10px] truncate flex-1 text-slate-700">{generatedToken}</span>
                     <button
-                      onClick={copyToken}
+                      onClick={() => void copyToken()}
                       className="px-2 py-1 bg-emerald-600 text-white rounded text-[10px] font-semibold flex items-center gap-1"
                     >
                       {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}

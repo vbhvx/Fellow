@@ -2,17 +2,31 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, BookOpen, Shield, Code2, Server } from 'lucide-react';
-import { apiRequest } from '@/lib/api-client';
+import { ArrowLeft, BookOpen } from 'lucide-react';
+import { ErrorAlert } from '@/components/ErrorAlert';
+import { apiRequest, errorMessage } from '@/lib/api/client';
+
+// The parts of an OpenAPI document this page renders.
+interface OpenApiOperation {
+  summary?: string;
+  description?: string;
+  tags?: string[];
+  security?: unknown[];
+  parameters?: Array<{ name?: string; in?: string; required?: boolean }>;
+}
+interface OpenApiSpec {
+  info?: { title?: string; description?: string; version?: string };
+  paths?: Record<string, Record<string, OpenApiOperation>>;
+}
 
 export default function DocsPage() {
-  const [spec, setSpec] = useState<any>(null);
+  const [spec, setSpec] = useState<OpenApiSpec | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    apiRequest('/api/v1/openapi.json')
-      .then((data) => setSpec(data))
-      .catch((err) => console.error(err))
+    apiRequest<OpenApiSpec>('/api/v1/openapi.json')
+      .then(setSpec, (err) => setError(errorMessage(err, 'Failed to load the API specification')))
       .finally(() => setLoading(false));
   }, []);
 
@@ -64,17 +78,18 @@ export default function DocsPage() {
           </div>
         </div>
 
+        {error && <ErrorAlert message={error} />}
         {loading ? (
           <div className="py-12 text-center text-slate-400 text-sm">Loading API specification...</div>
         ) : (
           <div className="space-y-4">
-            {Object.entries(spec?.paths || {}).map(([path, pathItem]: [string, any]) => (
+            {Object.entries(spec?.paths || {}).map(([path, pathItem]) => (
               <div key={path} className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
                 <div className="px-5 py-3.5 bg-slate-50/80 border-b border-slate-100 flex items-center justify-between font-mono text-xs font-bold text-slate-800">
                   <span>{path}</span>
                 </div>
                 <div className="divide-y divide-slate-100 p-2">
-                  {Object.entries(pathItem).map(([method, op]: [string, any]) => (
+                  {Object.entries(pathItem).map(([method, op]) => (
                     <div key={method} className="p-3 hover:bg-slate-50/50 rounded-xl transition-colors">
                       <div className="flex items-start sm:items-center justify-between gap-4 flex-col sm:flex-row">
                         <div className="flex items-center gap-3">
@@ -95,7 +110,7 @@ export default function DocsPage() {
                             Parameters
                           </span>
                           <div className="flex flex-wrap gap-2 text-xs">
-                            {op.parameters.map((p: any) => (
+                            {op.parameters.map((p) => (
                               <span
                                 key={p.name}
                                 className="px-2 py-0.5 bg-slate-100 text-slate-700 rounded font-mono text-[11px]"

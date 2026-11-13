@@ -3,7 +3,8 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { apiRequest } from '@/lib/api-client';
+import { errorMessage } from '@/lib/api/client';
+import { authApi } from '@/lib/api/endpoints';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -18,14 +19,10 @@ export default function LoginPage() {
     setError(null);
 
     try {
-      await apiRequest('/api/v1/auth/login', {
-        method: 'POST',
-        body: JSON.stringify({ email, password }),
-      });
-
+      await authApi.login({ email, password });
       router.push('/dashboard');
-    } catch (err: any) {
-      setError(err.message || 'Login failed');
+    } catch (err) {
+      setError(errorMessage(err, 'Login failed'));
     } finally {
       setLoading(false);
     }

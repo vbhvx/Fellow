@@ -24,7 +24,7 @@ export function errorMessage(error: unknown, fallback = 'Something went wrong. P
   return fallback;
 }
 
-export async function apiRequest<T = any>(
+export async function apiRequest<T = unknown>(
   path: string,
   options: RequestInit = {}
 ): Promise<T> {

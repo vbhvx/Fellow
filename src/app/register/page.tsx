@@ -3,7 +3,8 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { apiRequest } from '@/lib/api-client';
+import { errorMessage } from '@/lib/api/client';
+import { authApi } from '@/lib/api/endpoints';
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -19,14 +20,10 @@ export default function RegisterPage() {
     setError(null);
 
     try {
-      await apiRequest('/api/v1/auth/register', {
-        method: 'POST',
-        body: JSON.stringify({ name, email, password }),
-      });
-
+      await authApi.register({ name, email, password });
       router.push('/dashboard');
-    } catch (err: any) {
-      setError(err.message || 'Registration failed');
+    } catch (err) {
+      setError(errorMessage(err, 'Registration failed'));
     } finally {
       setLoading(false);
     }
