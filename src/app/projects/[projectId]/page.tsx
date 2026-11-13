@@ -146,7 +146,7 @@ function ProjectBoardContent() {
 
             {/* Add Task Button */}
             <button
-              onClick={() => openCreateTask(statuses[0]?.id || '')}
+              onClick={() => openCreateTask((statuses.find((s) => s.isDefault) ?? statuses[0])?.id || '')}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold shadow-sm transition-colors"
             >
               <Plus className="w-3.5 h-3.5" />

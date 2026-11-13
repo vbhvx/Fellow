@@ -11,12 +11,13 @@ import type { RealtimeStatus } from '@/lib/use-realtime';
 
 interface NavbarProps {
   currentOrgId?: string;
+  /** Only pages that subscribe to realtime pass this; without it the live indicator is hidden. */
   realtimeStatus?: RealtimeStatus;
 }
 
 const NO_RESULTS: SearchResults = { projects: [], tasks: [] };
 
-export function Navbar({ currentOrgId, realtimeStatus = 'disconnected' }: NavbarProps) {
+export function Navbar({ currentOrgId, realtimeStatus }: NavbarProps) {
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
   const [organizations, setOrganizations] = useState<Organization[]>([]);
@@ -161,23 +162,25 @@ export function Navbar({ currentOrgId, realtimeStatus = 'disconnected' }: Navbar
         {/* Right: Actions */}
         <div className="flex items-center gap-3">
           {/* Live Status Indicator */}
-          <div
-            className={`flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium border ${
-              realtimeStatus === 'connected'
-                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                : realtimeStatus === 'connecting'
-                ? 'bg-amber-50 text-amber-700 border-amber-200 animate-pulse'
-                : 'bg-slate-100 text-slate-600 border-slate-200'
-            }`}
-            title={`Real-time Stream: ${realtimeStatus}`}
-          >
-            {realtimeStatus === 'connected' ? (
-              <Wifi className="w-3 h-3 text-emerald-600" />
-            ) : (
-              <WifiOff className="w-3 h-3 text-slate-400" />
-            )}
-            <span className="capitalize hidden sm:inline">{realtimeStatus}</span>
-          </div>
+          {realtimeStatus && (
+            <div
+              className={`flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium border ${
+                realtimeStatus === 'connected'
+                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                  : realtimeStatus === 'connecting'
+                  ? 'bg-amber-50 text-amber-700 border-amber-200 animate-pulse'
+                  : 'bg-slate-100 text-slate-600 border-slate-200'
+              }`}
+              title={`Real-time Stream: ${realtimeStatus}`}
+            >
+              {realtimeStatus === 'connected' ? (
+                <Wifi className="w-3 h-3 text-emerald-600" />
+              ) : (
+                <WifiOff className="w-3 h-3 text-slate-400" />
+              )}
+              <span className="capitalize hidden sm:inline">{realtimeStatus}</span>
+            </div>
+          )}
 
           <Link
             href="/docs"
