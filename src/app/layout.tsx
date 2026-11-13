@@ -4,6 +4,14 @@ import './globals.css';
 export const metadata: Metadata = {
   title: 'Fellow | Secure Multi-Tenant Collaboration Platform',
   description: 'Enterprise-grade multi-tenant project and task collaboration platform with fine-grained authorization, real-time board sync, and audit history.',
+  icons: {
+    icon: [
+      { url: '/icon.svg', type: 'image/svg+xml' },
+      { url: '/favicon.ico', sizes: '32x32' },
+    ],
+    shortcut: '/icon.svg',
+    apple: '/icon.svg',
+  },
 };
 
 export default function RootLayout({
