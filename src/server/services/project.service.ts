@@ -16,6 +16,7 @@ import {
   BadRequestError,
   ForbiddenError,
   NotFoundError,
+  ConflictError,
 } from '@/server/errors/app-error';
 import { eq, and, sql } from 'drizzle-orm';
 import crypto from 'crypto';
@@ -150,6 +151,13 @@ export class ProjectService {
     }));
   }
 
+  /** Archived projects stay readable (and can be unarchived via updateProject) but take no other writes. */
+  static assertWritable(ctx: { project: { archivedAt: Date | null } }) {
+    if (ctx.project.archivedAt) {
+      throw new ConflictError('This project is archived. Unarchive it to make changes.');
+    }
+  }
+
   static async getProjectContext(userId: string, projectId: string) {
     const [project] = await db.select().from(projects).where(eq(projects.id, projectId)).limit(1);
     if (!project) {
@@ -265,6 +273,7 @@ export class ProjectService {
     role: ProjectRole
   ) {
     const ctx = await this.getProjectContext(currentUserId, projectId);
+    this.assertWritable(ctx);
     if (!permissions.canManageProject(ctx.orgMemCtx, ctx.projCtx, ctx.projMemCtx)) {
       throw new ForbiddenError('You do not have permission to manage members for this project');
     }
@@ -320,6 +329,7 @@ export class ProjectService {
 
   static async removeProjectMember(currentUserId: string, projectId: string, targetUserId: string) {
     const ctx = await this.getProjectContext(currentUserId, projectId);
+    this.assertWritable(ctx);
     if (!permissions.canManageProject(ctx.orgMemCtx, ctx.projCtx, ctx.projMemCtx)) {
       throw new ForbiddenError('You do not have permission to manage members for this project');
     }

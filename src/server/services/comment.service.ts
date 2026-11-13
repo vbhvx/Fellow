@@ -5,7 +5,7 @@ import { ProjectService } from './project.service';
 import { permissions } from '@/server/authorization/permissions';
 import { recordOutboxEvent, publishEvent } from '@/server/events/outbox';
 import { ForbiddenError, NotFoundError } from '@/server/errors/app-error';
-import { eq, and, sql, asc } from 'drizzle-orm';
+import { eq, and, sql, asc, isNull } from 'drizzle-orm';
 import crypto from 'crypto';
 
 export class CommentService {
@@ -34,6 +34,7 @@ export class CommentService {
   static async createComment(userId: string, taskId: string, content: string) {
     const task = await TaskService.getTaskById(userId, taskId);
     const ctx = await ProjectService.getProjectContext(userId, task.projectId);
+    ProjectService.assertWritable(ctx);
 
     if (!permissions.canCommentOnTask(ctx.orgMemCtx, ctx.projCtx, ctx.projMemCtx, task)) {
       throw new ForbiddenError('You do not have permission to comment on this task');
@@ -115,6 +116,8 @@ export class CommentService {
     if (comment.authorId !== userId) {
       throw new ForbiddenError('Only the author can edit this comment');
     }
+    // The author must still be able to see the project, and it must not be archived.
+    ProjectService.assertWritable(await ProjectService.getProjectContext(userId, comment.projectId));
 
     const [updated] = await db
       .update(taskComments)
@@ -122,8 +125,11 @@ export class CommentService {
         content,
         updatedAt: new Date(),
       })
-      .where(eq(taskComments.id, commentId))
+      .where(and(eq(taskComments.id, commentId), isNull(taskComments.deletedAt)))
       .returning();
+    if (!updated) {
+      throw new NotFoundError('Comment not found');
+    }
 
     return updated;
   }
@@ -135,6 +141,7 @@ export class CommentService {
     }
 
     const ctx = await ProjectService.getProjectContext(userId, comment.projectId);
+    ProjectService.assertWritable(ctx);
     const canDelete =
       comment.authorId === userId ||
       ctx.orgMemCtx.role === 'owner' ||
