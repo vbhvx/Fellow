@@ -12,12 +12,11 @@ import type { RealtimeStatus } from '@/lib/use-realtime';
 interface NavbarProps {
   currentOrgId?: string;
   realtimeStatus?: RealtimeStatus;
-  onOrgChange?: (orgId: string) => void;
 }
 
 const NO_RESULTS: SearchResults = { projects: [], tasks: [] };
 
-export function Navbar({ currentOrgId, realtimeStatus = 'disconnected', onOrgChange }: NavbarProps) {
+export function Navbar({ currentOrgId, realtimeStatus = 'disconnected' }: NavbarProps) {
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
   const [organizations, setOrganizations] = useState<Organization[]>([]);
@@ -127,8 +126,7 @@ export function Navbar({ currentOrgId, realtimeStatus = 'disconnected', onOrgCha
                   if (val === '__new__') {
                     router.push('/organizations/new');
                   } else {
-                    if (onOrgChange) onOrgChange(val);
-                    else router.push(`/dashboard?org=${val}`);
+                    router.push(`/dashboard?org=${val}`);
                   }
                 }}
                 className="bg-transparent text-slate-800 font-medium focus:outline-none cursor-pointer text-sm"

@@ -1,41 +1,17 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import {
-  FolderKanban,
-  CheckCircle2,
-  Clock,
-  AlertTriangle,
-  Plus,
-  ArrowRight,
-  Shield,
-  Users,
-  Search,
-  Lock,
-  Globe,
-} from 'lucide-react';
+import { FolderKanban, CheckCircle2, Clock, AlertTriangle, Plus, ArrowRight, Lock, Globe } from 'lucide-react';
 import { Navbar } from '@/components/Navbar';
-import { apiRequest } from '@/lib/api-client';
+import { ErrorAlert } from '@/components/ErrorAlert';
+import { Modal, ModalActions } from '@/components/Modal';
+import { errorMessage } from '@/lib/api/client';
+import { organizationsApi, searchApi } from '@/lib/api/endpoints';
+import type { ProjectSummary, SearchResults } from '@/lib/api/types';
 
-interface Project {
-  id: string;
-  name: string;
-  description?: string;
-  visibility: string;
-  myRole: string;
-  createdAt: string;
-}
-
-interface AssignedTask {
-  id: string;
-  projectId: string;
-  title: string;
-  priority: string;
-  dueAt?: string | null;
-  updatedAt: string;
-}
+type AssignedTask = SearchResults['tasks'][number];
 
 export default function DashboardPage() {
   return (
@@ -48,8 +24,10 @@ export default function DashboardPage() {
 function DashboardContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [currentOrgId, setCurrentOrgId] = useState<string | null>(null);
-  const [projects, setProjects] = useState<Project[]>([]);
+  // The URL (?org=) is the one source of truth for the active organization; without it, the first one.
+  const orgParam = searchParams.get('org');
+  const [currentOrgId, setCurrentOrgId] = useState<string | null>(orgParam);
+  const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [assignedTasks, setAssignedTasks] = useState<AssignedTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -61,41 +39,40 @@ function DashboardContent() {
   const [newProjectVisibility, setNewProjectVisibility] = useState('organization');
   const [creatingProject, setCreatingProject] = useState(false);
 
-  const loadDashboardData = useCallback(async (orgId?: string) => {
-    setLoading(true);
-    setError(null);
-    try {
-      // 1. Get user organizations if orgId not specified
-      let activeOrg = orgId;
-      if (!activeOrg) {
-        const orgsRes = await apiRequest('/api/v1/organizations');
-        const orgList = orgsRes.organizations || [];
-        if (orgList.length === 0) {
-          router.push('/organizations/new');
-          return;
-        }
-        activeOrg = orgList[0].id;
-      }
-      setCurrentOrgId(activeOrg || null);
-
-      // 2. Fetch accessible projects for this organization
-      const projRes = await apiRequest(`/api/v1/organizations/${activeOrg}/projects`);
-      setProjects(projRes.projects || []);
-
-      // 3. Fetch user's assigned tasks across accessible projects
-      const searchRes = await apiRequest(`/api/v1/search?organizationId=${activeOrg}&q=%`);
-      setAssignedTasks(searchRes.tasks || []);
-    } catch (err: any) {
-      setError(err.message || 'Failed to load dashboard data');
-    } finally {
-      setLoading(false);
-    }
-  }, [router]);
-
   useEffect(() => {
-    const orgParam = searchParams.get('org');
-    loadDashboardData(orgParam || undefined);
-  }, [searchParams, loadDashboardData]);
+    // A slower load for a previously selected organization must not overwrite this one.
+    let current = true;
+    (async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        let orgId = orgParam;
+        if (!orgId) {
+          const orgs = await organizationsApi.list();
+          if (orgs.length === 0) {
+            router.push('/organizations/new');
+            return;
+          }
+          orgId = orgs[0].id;
+        }
+        const [orgProjects, mine] = await Promise.all([
+          organizationsApi.projects(orgId),
+          searchApi.search({ organizationId: orgId, assigneeId: 'me' }),
+        ]);
+        if (!current) return;
+        setCurrentOrgId(orgId);
+        setProjects(orgProjects);
+        setAssignedTasks(mine.tasks);
+      } catch (err) {
+        if (current) setError(errorMessage(err, 'Failed to load dashboard data'));
+      } finally {
+        if (current) setLoading(false);
+      }
+    })();
+    return () => {
+      current = false;
+    };
+  }, [orgParam, router]);
 
   const handleCreateProject = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -103,21 +80,17 @@ function DashboardContent() {
 
     setCreatingProject(true);
     try {
-      const res = await apiRequest(`/api/v1/organizations/${currentOrgId}/projects`, {
-        method: 'POST',
-        body: JSON.stringify({
-          name: newProjectName.trim(),
-          description: newProjectDesc.trim() || null,
-          visibility: newProjectVisibility,
-        }),
+      const project = await organizationsApi.createProject(currentOrgId, {
+        name: newProjectName.trim(),
+        description: newProjectDesc.trim() || null,
+        visibility: newProjectVisibility,
       });
-
       setShowCreateModal(false);
       setNewProjectName('');
       setNewProjectDesc('');
-      router.push(`/projects/${res.project.id}`);
-    } catch (err: any) {
-      setError(err.message);
+      router.push(`/projects/${project.id}`);
+    } catch (err) {
+      setError(errorMessage(err));
     } finally {
       setCreatingProject(false);
     }
@@ -128,13 +101,7 @@ function DashboardContent() {
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
-      <Navbar
-        currentOrgId={currentOrgId || undefined}
-        onOrgChange={(orgId) => {
-          setCurrentOrgId(orgId);
-          loadDashboardData(orgId);
-        }}
-      />
+      <Navbar currentOrgId={currentOrgId || undefined} />
 
       <main className="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8 space-y-8">
         {/* Welcome Banner */}
@@ -155,14 +122,7 @@ function DashboardContent() {
         </div>
 
         {/* Error message */}
-        {error && (
-          <div className="bg-rose-50 border border-rose-200 p-4 rounded-xl text-rose-700 text-sm flex items-center justify-between">
-            <span>{error}</span>
-            <button onClick={() => setError(null)} className="font-bold text-rose-500 hover:text-rose-700">
-              ✕
-            </button>
-          </div>
-        )}
+        {error && <ErrorAlert message={error} onDismiss={() => setError(null)} />}
 
         {/* Overview Summary Metrics */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -178,7 +138,7 @@ function DashboardContent() {
 
           <div className="bg-white p-5 rounded-2xl border border-slate-200/90 shadow-sm flex items-center justify-between">
             <div>
-              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Active Tasks</span>
+              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">My Tasks</span>
               <p className="text-2xl font-black text-slate-900 mt-1">{assignedTasks.length}</p>
             </div>
             <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
@@ -288,7 +248,7 @@ function DashboardContent() {
             </h3>
 
             {overdueTasks.length === 0 ? (
-              <p className="text-xs text-slate-400 italic">No overdue work in accessible projects.</p>
+              <p className="text-xs text-slate-400 italic">None of your tasks are overdue.</p>
             ) : (
               <div className="divide-y divide-slate-100">
                 {overdueTasks.slice(0, 5).map((t) => (
@@ -316,11 +276,11 @@ function DashboardContent() {
           <div className="bg-white p-6 rounded-2xl border border-slate-200/90 shadow-sm">
             <h3 className="text-sm font-bold text-slate-900 mb-4 flex items-center gap-2">
               <Clock className="w-4 h-4 text-indigo-600" />
-              <span>Recently Updated Work</span>
+              <span>My Recently Updated Tasks</span>
             </h3>
 
             {assignedTasks.length === 0 ? (
-              <p className="text-xs text-slate-400 italic">No recent task updates recorded.</p>
+              <p className="text-xs text-slate-400 italic">No tasks are assigned to you yet.</p>
             ) : (
               <div className="divide-y divide-slate-100">
                 {assignedTasks.slice(0, 5).map((t) => (
@@ -346,9 +306,7 @@ function DashboardContent() {
 
       {/* Create Project Modal */}
       {showCreateModal && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-md p-6">
-            <h3 className="text-base font-bold text-slate-900 mb-4">Create New Project</h3>
+        <Modal title="Create New Project" onClose={() => setShowCreateModal(false)}>
             <form onSubmit={handleCreateProject} className="space-y-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-600 mb-1">Project Name</label>
@@ -387,25 +345,13 @@ function DashboardContent() {
                 </select>
               </div>
 
-              <div className="flex justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowCreateModal(false)}
-                  className="px-4 py-2 border border-slate-200 text-slate-700 rounded-lg text-xs font-semibold hover:bg-slate-50 transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={creatingProject}
-                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold shadow-sm transition-colors disabled:opacity-50"
-                >
-                  {creatingProject ? 'Creating...' : 'Create Project'}
-                </button>
-              </div>
+              <ModalActions
+                onCancel={() => setShowCreateModal(false)}
+                submitLabel={creatingProject ? 'Creating...' : 'Create Project'}
+                submitting={creatingProject}
+              />
             </form>
-          </div>
-        </div>
+        </Modal>
       )}
     </div>
   );
