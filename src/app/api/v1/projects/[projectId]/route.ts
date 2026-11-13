@@ -1,51 +1,27 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { requireUser } from '@/server/auth/guard';
 import { ProjectService } from '@/server/services/project.service';
 import { updateProjectSchema } from '@/server/validation/schemas';
-import { formatErrorResponse, ValidationError } from '@/server/errors/app-error';
+import { parseBody, route } from '@/server/http/route';
 
-export async function GET(
-  req: NextRequest,
-  { params }: { params: { projectId: string } }
-) {
-  try {
-    const session = await requireUser(req);
-    const project = await ProjectService.getProjectById(session.userId, params.projectId);
-    return NextResponse.json({ project });
-  } catch (error) {
-    return formatErrorResponse(error, req);
-  }
-}
+type Params = { projectId: string };
 
-export async function PATCH(
-  req: NextRequest,
-  { params }: { params: { projectId: string } }
-) {
-  try {
-    const session = await requireUser(req);
-    const body = await req.json();
-    const result = updateProjectSchema.safeParse(body);
-    if (!result.success) {
-      throw new ValidationError('Invalid update input', result.error.flatten().fieldErrors);
-    }
+export const GET = route<Params>(async (req, { params }) => {
+  const session = await requireUser(req);
+  const project = await ProjectService.getProjectById(session.userId, params.projectId);
+  return NextResponse.json({ project });
+});
 
-    const updated = await ProjectService.updateProject(session.userId, params.projectId, result.data);
-    return NextResponse.json({ project: updated });
-  } catch (error) {
-    return formatErrorResponse(error, req);
-  }
-}
+export const PATCH = route<Params>(async (req, { params }) => {
+  const session = await requireUser(req);
+  const input = await parseBody(req, updateProjectSchema, 'Invalid update input');
+  const project = await ProjectService.updateProject(session.userId, params.projectId, input);
+  return NextResponse.json({ project });
+});
 
-export async function DELETE(
-  req: NextRequest,
-  { params }: { params: { projectId: string } }
-) {
-  try {
-    const session = await requireUser(req);
-    await ProjectService.updateProject(session.userId, params.projectId, { archived: true });
-    return NextResponse.json({ success: true, message: 'Project archived successfully' });
-  } catch (error) {
-    return formatErrorResponse(error, req);
-  }
-}
-
+// Projects are archived, never hard-deleted.
+export const DELETE = route<Params>(async (req, { params }) => {
+  const session = await requireUser(req);
+  await ProjectService.updateProject(session.userId, params.projectId, { archived: true });
+  return NextResponse.json({ success: true, message: 'Project archived successfully' });
+});

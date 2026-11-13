@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useRef } from 'react';
 
 export type RealtimeStatus = 'connected' | 'connecting' | 'disconnected';
 

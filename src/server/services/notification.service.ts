@@ -2,7 +2,6 @@ import { db } from '@/db/client';
 import { notifications, tasks, projects, projectMemberships, organizationMemberships } from '@/db/schema';
 import { permissions, OrgRole, ProjectRole, ProjectVisibility } from '@/server/authorization/permissions';
 import { eq, and, desc, sql } from 'drizzle-orm';
-import crypto from 'crypto';
 
 export class NotificationService {
   static async getUserNotifications(userId: string, organizationId?: string) {

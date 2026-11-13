@@ -10,7 +10,7 @@ import crypto from 'crypto';
 
 export class CommentService {
   static async getTaskComments(userId: string, taskId: string) {
-    const task = await TaskService.getTaskById(userId, taskId);
+    await TaskService.getTaskById(userId, taskId); // access check
 
     const comments = await db
       .select({

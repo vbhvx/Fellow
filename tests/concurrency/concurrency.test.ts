@@ -86,7 +86,7 @@ describe('Concurrency Control, Outbox Publishing & Move Safety', () => {
   });
 
   it('atomically records outbox events and reliably publishes them', async () => {
-    const task = await TaskService.createTask(user.id, project.id, {
+    await TaskService.createTask(user.id, project.id, {
       title: 'Outbox Event Task',
       statusId: statusTodo.id,
     });

@@ -1,51 +1,26 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { requireUser } from '@/server/auth/guard';
 import { TaskService } from '@/server/services/task.service';
 import { updateTaskSchema } from '@/server/validation/schemas';
-import { formatErrorResponse, ValidationError } from '@/server/errors/app-error';
+import { parseBody, route } from '@/server/http/route';
 
-export async function GET(
-  req: NextRequest,
-  { params }: { params: { taskId: string } }
-) {
-  try {
-    const session = await requireUser(req);
-    const task = await TaskService.getTaskById(session.userId, params.taskId);
-    return NextResponse.json({ task });
-  } catch (error) {
-    return formatErrorResponse(error, req);
-  }
-}
+type Params = { taskId: string };
 
-export async function PATCH(
-  req: NextRequest,
-  { params }: { params: { taskId: string } }
-) {
-  try {
-    const session = await requireUser(req);
-    const body = await req.json();
-    const result = updateTaskSchema.safeParse(body);
-    if (!result.success) {
-      throw new ValidationError('Invalid update input', result.error.flatten().fieldErrors);
-    }
+export const GET = route<Params>(async (req, { params }) => {
+  const session = await requireUser(req);
+  const task = await TaskService.getTaskById(session.userId, params.taskId);
+  return NextResponse.json({ task });
+});
 
-    const updated = await TaskService.updateTask(session.userId, params.taskId, result.data);
-    return NextResponse.json({ task: updated });
-  } catch (error) {
-    return formatErrorResponse(error, req);
-  }
-}
+export const PATCH = route<Params>(async (req, { params }) => {
+  const session = await requireUser(req);
+  const input = await parseBody(req, updateTaskSchema, 'Invalid update input');
+  const task = await TaskService.updateTask(session.userId, params.taskId, input);
+  return NextResponse.json({ task });
+});
 
-export async function DELETE(
-  req: NextRequest,
-  { params }: { params: { taskId: string } }
-) {
-  try {
-    const session = await requireUser(req);
-    await TaskService.deleteTask(session.userId, params.taskId);
-    return NextResponse.json({ success: true, message: 'Task deleted successfully' });
-  } catch (error) {
-    return formatErrorResponse(error, req);
-  }
-}
-
+export const DELETE = route<Params>(async (req, { params }) => {
+  const session = await requireUser(req);
+  await TaskService.deleteTask(session.userId, params.taskId);
+  return NextResponse.json({ success: true, message: 'Task deleted successfully' });
+});

@@ -2,15 +2,9 @@ import { NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 import YAML from 'yaml';
+import { route } from '@/server/http/route';
 
-export async function GET() {
-  try {
-    const yamlPath = path.join(process.cwd(), 'docs', 'openapi.yaml');
-    const file = fs.readFileSync(yamlPath, 'utf8');
-    const json = YAML.parse(file);
-    return NextResponse.json(json);
-  } catch (err: any) {
-    return NextResponse.json({ error: 'Failed to load OpenAPI specification', details: err.message }, { status: 500 });
-  }
-}
-
+export const GET = route(async () => {
+  const file = fs.readFileSync(path.join(process.cwd(), 'docs', 'openapi.yaml'), 'utf8');
+  return NextResponse.json(YAML.parse(file));
+});

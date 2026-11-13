@@ -240,7 +240,7 @@ export class ProjectService {
   }
 
   static async getProjectMembers(userId: string, projectId: string) {
-    const ctx = await this.getProjectContext(userId, projectId);
+    await this.getProjectContext(userId, projectId); // throws unless the user can view the project
 
     const rows = await db
       .select({

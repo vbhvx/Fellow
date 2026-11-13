@@ -1,10 +1,9 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { NextRequest } from 'next/server';
 import { POST as registerHandler } from '@/app/api/v1/auth/register/route';
-import { POST as loginHandler } from '@/app/api/v1/auth/login/route';
 import { GET as meHandler } from '@/app/api/v1/me/route';
 import { POST as createOrgHandler, GET as listOrgHandler } from '@/app/api/v1/organizations/route';
-import { POST as createProjectHandler, GET as listProjectsHandler } from '@/app/api/v1/organizations/[organizationId]/projects/route';
+import { POST as createProjectHandler } from '@/app/api/v1/organizations/[organizationId]/projects/route';
 import { POST as createTaskHandler, GET as listTasksHandler } from '@/app/api/v1/projects/[projectId]/tasks/route';
 import { POST as moveTaskHandler } from '@/app/api/v1/tasks/[taskId]/move/route';
 import { POST as addCommentHandler, GET as listCommentsHandler } from '@/app/api/v1/tasks/[taskId]/comments/route';

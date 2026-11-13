@@ -11,7 +11,7 @@ import {
   ForbiddenError,
   NotFoundError,
 } from '@/server/errors/app-error';
-import { eq, and, sql } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import crypto from 'crypto';
 
 export class OrganizationService {

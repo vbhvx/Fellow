@@ -23,6 +23,7 @@ import {
   ConflictError,
 } from '@/server/errors/app-error';
 import { eq, and, sql, desc, asc } from 'drizzle-orm';
+import type { TaskListFilters, TaskPriority } from '@/server/validation/schemas';
 import crypto from 'crypto';
 
 // Row lock on the workflow status acts as a per-column mutex for ordering writes.
@@ -34,9 +35,9 @@ export class TaskService {
   static async getProjectTasks(
     userId: string,
     projectId: string,
-    filters?: { statusId?: string; assigneeId?: string; priority?: string }
+    filters?: TaskListFilters
   ) {
-    const ctx = await ProjectService.getProjectContext(userId, projectId);
+    await ProjectService.getProjectContext(userId, projectId); // throws unless the user can view the project
 
     const conditions = [
       eq(tasks.projectId, projectId),
@@ -90,7 +91,7 @@ export class TaskService {
     }
 
     // Tenant & Project access check
-    const ctx = await ProjectService.getProjectContext(userId, task.projectId);
+    await ProjectService.getProjectContext(userId, task.projectId);
 
     const [status] = await db
       .select()
@@ -118,7 +119,7 @@ export class TaskService {
       title: string;
       description?: string | null;
       statusId: string;
-      priority?: any;
+      priority?: TaskPriority;
       assigneeId?: string | null;
       parentTaskId?: string | null;
       dueAt?: string | null;
@@ -252,7 +253,7 @@ export class TaskService {
       title?: string;
       description?: string | null;
       statusId?: string;
-      priority?: any;
+      priority?: TaskPriority;
       assigneeId?: string | null;
       parentTaskId?: string | null;
       dueAt?: string | null;
@@ -665,7 +666,7 @@ export class TaskService {
   }
 
   static async getTaskActivity(userId: string, taskId: string) {
-    const task = await this.getTaskById(userId, taskId);
+    await this.getTaskById(userId, taskId); // access check
 
     const activities = await db
       .select({

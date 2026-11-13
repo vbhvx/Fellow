@@ -3,7 +3,6 @@ import {
   computePosition,
   rebalancePositions,
   INITIAL_POSITION,
-  POSITION_STEP,
   MIN_POSITION_GAP,
 } from '@/server/ordering/fractional-index';
 

@@ -5,10 +5,11 @@ import { permissions } from '@/server/authorization/permissions';
 import { BadRequestError, ForbiddenError, NotFoundError } from '@/server/errors/app-error';
 import { eq, and, asc } from 'drizzle-orm';
 import crypto from 'crypto';
+import type { StatusCategory } from '@/server/validation/schemas';
 
 export class WorkflowService {
   static async getProjectStatuses(userId: string, projectId: string) {
-    const ctx = await ProjectService.getProjectContext(userId, projectId);
+    await ProjectService.getProjectContext(userId, projectId); // throws unless the user can view the project
 
     const statuses = await db
       .select()
@@ -22,7 +23,7 @@ export class WorkflowService {
   static async createWorkflowStatus(
     userId: string,
     projectId: string,
-    data: { name: string; key: string; category?: any; position?: number; isDefault?: boolean }
+    data: { name: string; key: string; category?: StatusCategory; position?: number; isDefault?: boolean }
   ) {
     const ctx = await ProjectService.getProjectContext(userId, projectId);
     if (!permissions.canManageWorkflow(ctx.orgMemCtx, ctx.projCtx, ctx.projMemCtx)) {
@@ -67,7 +68,7 @@ export class WorkflowService {
     userId: string,
     projectId: string,
     statusId: string,
-    data: { name?: string; category?: any; position?: number }
+    data: { name?: string; category?: StatusCategory; position?: number }
   ) {
     const ctx = await ProjectService.getProjectContext(userId, projectId);
     if (!permissions.canManageWorkflow(ctx.orgMemCtx, ctx.projCtx, ctx.projMemCtx)) {

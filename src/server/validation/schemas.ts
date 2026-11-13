@@ -1,5 +1,8 @@
 import { z } from 'zod';
 
+const priority = z.enum(['urgent', 'high', 'medium', 'low', 'none']);
+const statusCategory = z.enum(['backlog', 'unstarted', 'started', 'completed', 'cancelled']);
+
 // Auth
 export const registerSchema = z.object({
   email: z.string().email('Invalid email address').max(255),
@@ -56,8 +59,7 @@ export const updateProjectSchema = z.object({
   archived: z.boolean().optional(),
 });
 
-export const addProjectMemberSchema = z.object({
-  userId: z.string().min(1, 'User ID is required'),
+export const setProjectMemberSchema = z.object({
   role: z.enum(['lead', 'member', 'viewer']).default('member'),
 });
 
@@ -65,15 +67,9 @@ export const addProjectMemberSchema = z.object({
 export const createWorkflowStatusSchema = z.object({
   name: z.string().min(1, 'Status name is required').max(255),
   key: z.string().min(1).max(64).regex(/^[a-z0-9_]+$/),
-  category: z.enum(['backlog', 'unstarted', 'started', 'completed', 'cancelled']).default('unstarted'),
+  category: statusCategory.default('unstarted'),
   position: z.number().optional(),
   isDefault: z.boolean().default(false),
-});
-
-export const updateWorkflowStatusSchema = z.object({
-  name: z.string().min(1).max(255).optional(),
-  category: z.enum(['backlog', 'unstarted', 'started', 'completed', 'cancelled']).optional(),
-  position: z.number().optional(),
 });
 
 // Task
@@ -81,7 +77,7 @@ export const createTaskSchema = z.object({
   title: z.string().min(1, 'Task title is required').max(255),
   description: z.string().optional().nullable(),
   statusId: z.string().min(1, 'Status ID is required'),
-  priority: z.enum(['urgent', 'high', 'medium', 'low', 'none']).default('medium'),
+  priority: priority.default('medium'),
   assigneeId: z.string().optional().nullable(),
   parentTaskId: z.string().optional().nullable(),
   dueAt: z.string().datetime().optional().nullable(),
@@ -92,7 +88,7 @@ export const updateTaskSchema = z.object({
   title: z.string().min(1).max(255).optional(),
   description: z.string().optional().nullable(),
   statusId: z.string().optional(),
-  priority: z.enum(['urgent', 'high', 'medium', 'low', 'none']).optional(),
+  priority: priority.optional(),
   assigneeId: z.string().optional().nullable(),
   parentTaskId: z.string().optional().nullable(),
   dueAt: z.string().datetime().optional().nullable(),
@@ -116,12 +112,35 @@ export const updateCommentSchema = z.object({
   content: z.string().min(1, 'Comment content cannot be empty').max(5000),
 });
 
+export const taskListQuerySchema = z.object({
+  statusId: z.string().optional(),
+  assigneeId: z.string().optional(),
+  priority: priority.optional(),
+});
+
+// Notifications
+export const notificationListQuerySchema = z.object({
+  organizationId: z.string().optional(),
+});
+
+export const markAllNotificationsReadSchema = z.object({
+  organizationId: z.string().optional(),
+});
+
 // Search
-export const searchParamsSchema = z.object({
-  q: z.string().min(1, 'Search query cannot be empty'),
+export const searchQuerySchema = z.object({
+  organizationId: z.string({ error: 'Query parameter "organizationId" is required' }),
+  // Optional: without q, the filters alone select tasks (e.g. assigneeId=me for "my tasks").
+  q: z.string().trim().max(200).optional(),
   projectId: z.string().optional(),
   statusId: z.string().optional(),
-  priority: z.enum(['urgent', 'high', 'medium', 'low', 'none']).optional(),
+  priority: priority.optional(),
+  // "me" resolves to the signed-in user.
   assigneeId: z.string().optional(),
 });
 
+// Types shared with the services, derived from the schemas so the two cannot drift apart.
+export type TaskPriority = z.infer<typeof priority>;
+export type StatusCategory = z.infer<typeof statusCategory>;
+export type TaskListFilters = z.infer<typeof taskListQuerySchema>;
+export type SearchQuery = z.infer<typeof searchQuerySchema>;

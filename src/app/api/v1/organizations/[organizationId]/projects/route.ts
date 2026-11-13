@@ -1,39 +1,22 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { requireUser } from '@/server/auth/guard';
 import { ProjectService } from '@/server/services/project.service';
 import { createProjectSchema } from '@/server/validation/schemas';
-import { formatErrorResponse, ValidationError } from '@/server/errors/app-error';
+import { parseBody, route } from '@/server/http/route';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(
-  req: NextRequest,
-  { params }: { params: { organizationId: string } }
-) {
-  try {
-    const session = await requireUser(req);
-    const accessible = await ProjectService.getAccessibleProjects(session.userId, params.organizationId);
-    return NextResponse.json({ projects: accessible });
-  } catch (error) {
-    return formatErrorResponse(error, req);
-  }
-}
+type Params = { organizationId: string };
 
-export async function POST(
-  req: NextRequest,
-  { params }: { params: { organizationId: string } }
-) {
-  try {
-    const session = await requireUser(req);
-    const body = await req.json();
-    const result = createProjectSchema.safeParse(body);
-    if (!result.success) {
-      throw new ValidationError('Invalid project input', result.error.flatten().fieldErrors);
-    }
+export const GET = route<Params>(async (req, { params }) => {
+  const session = await requireUser(req);
+  const projects = await ProjectService.getAccessibleProjects(session.userId, params.organizationId);
+  return NextResponse.json({ projects });
+});
 
-    const project = await ProjectService.createProject(session.userId, params.organizationId, result.data);
-    return NextResponse.json({ project }, { status: 201 });
-  } catch (error) {
-    return formatErrorResponse(error, req);
-  }
-}
+export const POST = route<Params>(async (req, { params }) => {
+  const session = await requireUser(req);
+  const input = await parseBody(req, createProjectSchema, 'Invalid project input');
+  const project = await ProjectService.createProject(session.userId, params.organizationId, input);
+  return NextResponse.json({ project }, { status: 201 });
+});
