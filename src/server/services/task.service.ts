@@ -22,9 +22,19 @@ import {
   NotFoundError,
   ConflictError,
 } from '@/server/errors/app-error';
-import { eq, and, sql, desc, asc } from 'drizzle-orm';
+import { eq, and, sql, desc, asc, isNull } from 'drizzle-orm';
 import type { TaskListFilters, TaskPriority } from '@/server/validation/schemas';
 import crypto from 'crypto';
+
+/**
+ * completedAt after a task lands in a column: set when it first enters a completed column, kept
+ * while it stays in completed columns (reordering inside Done must not re-date it), cleared when
+ * it leaves them. `undefined` means "leave the column unchanged".
+ */
+export function nextCompletedAt(current: Date | null, targetCategory: string): Date | null | undefined {
+  if (targetCategory === 'completed') return current ?? new Date();
+  return current ? null : undefined;
+}
 
 // Row lock on the workflow status acts as a per-column mutex for ordering writes.
 async function lockColumn(tx: Transaction, statusId: string) {
@@ -127,6 +137,7 @@ export class TaskService {
     }
   ) {
     const ctx = await ProjectService.getProjectContext(userId, projectId);
+    ProjectService.assertWritable(ctx);
     if (!permissions.canCreateTask(ctx.orgMemCtx, ctx.projCtx, ctx.projMemCtx)) {
       throw new ForbiddenError('You do not have permission to create tasks in this project');
     }
@@ -262,6 +273,7 @@ export class TaskService {
   ) {
     const existing = await this.getTaskById(userId, taskId);
     const ctx = await ProjectService.getProjectContext(userId, existing.projectId);
+    ProjectService.assertWritable(ctx);
 
     if (!permissions.canEditTask(ctx.orgMemCtx, ctx.projCtx, ctx.projMemCtx, existing)) {
       throw new ForbiddenError('You do not have permission to edit this task');
@@ -305,11 +317,7 @@ export class TaskService {
         throw new BadRequestError('Invalid workflow status for this project');
       }
 
-      if (newStatus.category === 'completed') {
-        completedAt = new Date();
-      } else if (existing.completedAt) {
-        completedAt = null;
-      }
+      completedAt = nextCompletedAt(existing.completedAt, newStatus.category) ?? existing.completedAt;
     }
 
     const { updatedTask, envelope } = await db.transaction(async (tx) => {
@@ -328,7 +336,7 @@ export class TaskService {
           version: newVersion,
           updatedAt: new Date(),
         })
-        .where(and(eq(tasks.id, taskId), eq(tasks.version, existing.version)))
+        .where(and(eq(tasks.id, taskId), eq(tasks.version, existing.version), isNull(tasks.deletedAt)))
         .returning();
 
       if (!updated) {
@@ -409,6 +417,7 @@ export class TaskService {
   ) {
     const task = await this.getTaskById(userId, taskId);
     const sourceCtx = await ProjectService.getProjectContext(userId, task.projectId);
+    ProjectService.assertWritable(sourceCtx);
 
     if (!permissions.canReorderTask(sourceCtx.orgMemCtx, sourceCtx.projCtx, sourceCtx.projMemCtx, task)) {
       throw new ForbiddenError('You do not have permission to reorder or move this task');
@@ -418,6 +427,7 @@ export class TaskService {
     let targetCtx = sourceCtx;
     if (targetProjectId !== task.projectId) {
       targetCtx = await ProjectService.getProjectContext(userId, targetProjectId);
+      ProjectService.assertWritable(targetCtx);
       if (targetCtx.project.organizationId !== task.organizationId) {
         throw new ForbiddenError('Cannot move tasks across different organizations');
       }
@@ -564,7 +574,7 @@ export class TaskService {
       }
 
       const newVersion = task.version + 1;
-      const completedAt = targetStatus.category === 'completed' ? new Date() : (task.completedAt ? null : undefined);
+      const completedAt = nextCompletedAt(task.completedAt, targetStatus.category);
 
       const [updated] = await tx
         .update(tasks)
@@ -576,7 +586,7 @@ export class TaskService {
           ...(completedAt !== undefined ? { completedAt } : {}),
           updatedAt: new Date(),
         })
-        .where(and(eq(tasks.id, taskId), eq(tasks.version, task.version)))
+        .where(and(eq(tasks.id, taskId), eq(tasks.version, task.version), isNull(tasks.deletedAt)))
         .returning();
 
       if (!updated) {
@@ -623,17 +633,23 @@ export class TaskService {
   static async deleteTask(userId: string, taskId: string) {
     const task = await this.getTaskById(userId, taskId);
     const ctx = await ProjectService.getProjectContext(userId, task.projectId);
+    ProjectService.assertWritable(ctx);
 
     if (!permissions.canDeleteTask(ctx.orgMemCtx, ctx.projCtx, ctx.projMemCtx, task, userId)) {
       throw new ForbiddenError('You do not have permission to delete this task');
     }
 
     const { envelope } = await db.transaction(async (tx) => {
-      // Soft-delete
-      await tx
+      // Soft-delete, only if still live. Bumping the version makes any in-flight edit, which
+      // compares against the old version, fail instead of writing to the deleted task.
+      const [deleted] = await tx
         .update(tasks)
-        .set({ deletedAt: new Date() })
-        .where(eq(tasks.id, taskId));
+        .set({ deletedAt: new Date(), version: sql`${tasks.version} + 1` })
+        .where(and(eq(tasks.id, taskId), isNull(tasks.deletedAt)))
+        .returning({ version: tasks.version });
+      if (!deleted) {
+        throw new NotFoundError('Task not found');
+      }
 
       await tx.insert(taskActivities).values({
         id: `act_${crypto.randomUUID()}`,
@@ -653,7 +669,7 @@ export class TaskService {
           aggregateType: 'task',
           aggregateId: taskId,
           eventType: 'task.deleted',
-          payload: { taskId, projectId: task.projectId },
+          payload: { taskId, projectId: task.projectId, version: deleted.version },
         },
         tx
       );
