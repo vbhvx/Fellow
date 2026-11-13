@@ -11,7 +11,7 @@ import {
   ForbiddenError,
   NotFoundError,
 } from '@/server/errors/app-error';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, gt, isNull, asc } from 'drizzle-orm';
 import crypto from 'crypto';
 
 export class OrganizationService {
@@ -205,56 +205,51 @@ export class OrganizationService {
   static async acceptInvitation(userId: string, plainToken: string) {
     const tokenHash = crypto.createHash('sha256').update(plainToken).digest('hex');
 
-    const [invitation] = await db
-      .select()
-      .from(organizationInvitations)
-      .where(eq(organizationInvitations.tokenHash, tokenHash))
-      .limit(1);
-
-    if (!invitation) {
-      throw new NotFoundError('Invalid invitation token');
-    }
-
-    if (invitation.acceptedAt) {
-      throw new BadRequestError('Invitation has already been accepted');
-    }
-
-    if (invitation.revokedAt) {
-      throw new BadRequestError('Invitation has been revoked');
-    }
-
-    if (new Date() > new Date(invitation.expiresAt)) {
-      throw new BadRequestError('Invitation has expired');
-    }
-
     return await db.transaction(async (tx) => {
-      // Check if user is already a member
-      const existing = await tx
-        .select()
-        .from(organizationMemberships)
-        .where(
-          and(
-            eq(organizationMemberships.organizationId, invitation.organizationId),
-            eq(organizationMemberships.userId, userId)
-          )
-        )
-        .limit(1);
-
-      if (existing.length > 0) {
-        throw new BadRequestError('You are already a member of this organization');
-      }
-
-      await tx.insert(organizationMemberships).values({
-        id: `mem_${crypto.randomUUID()}`,
-        organizationId: invitation.organizationId,
-        userId,
-        role: invitation.role,
-      });
-
-      await tx
+      // pending -> accepted happens in this one statement, so two concurrent accepts of the same
+      // token cannot both pass: the loser updates no row.
+      const [invitation] = await tx
         .update(organizationInvitations)
         .set({ acceptedAt: new Date() })
-        .where(eq(organizationInvitations.id, invitation.id));
+        .where(
+          and(
+            eq(organizationInvitations.tokenHash, tokenHash),
+            isNull(organizationInvitations.acceptedAt),
+            isNull(organizationInvitations.revokedAt),
+            gt(organizationInvitations.expiresAt, new Date())
+          )
+        )
+        .returning();
+
+      if (!invitation) {
+        // Say why: read the invitation as it is now.
+        const [current] = await tx
+          .select()
+          .from(organizationInvitations)
+          .where(eq(organizationInvitations.tokenHash, tokenHash))
+          .limit(1);
+        if (!current) throw new NotFoundError('Invalid invitation token');
+        if (current.acceptedAt) throw new BadRequestError('Invitation has already been accepted');
+        if (current.revokedAt) throw new BadRequestError('Invitation has been revoked');
+        throw new BadRequestError('Invitation has expired');
+      }
+
+      // The unique (organization, user) constraint decides "already a member" atomically; throwing
+      // rolls the acceptance back, so the invitation stays usable for the person it was meant for.
+      const [membership] = await tx
+        .insert(organizationMemberships)
+        .values({
+          id: `mem_${crypto.randomUUID()}`,
+          organizationId: invitation.organizationId,
+          userId,
+          role: invitation.role,
+        })
+        .onConflictDoNothing({ target: [organizationMemberships.organizationId, organizationMemberships.userId] })
+        .returning({ id: organizationMemberships.id });
+
+      if (!membership) {
+        throw new BadRequestError('You are already a member of this organization');
+      }
 
       return {
         organizationId: invitation.organizationId,
@@ -285,33 +280,37 @@ export class OrganizationService {
       throw new NotFoundError('Target user is not a member of this organization');
     }
 
-    // Protect last owner removal!
-    if (targetMembership.role === 'owner') {
-      const owners = await db
-        .select()
-        .from(organizationMemberships)
-        .where(
-          and(
-            eq(organizationMemberships.organizationId, organizationId),
-            eq(organizationMemberships.role, 'owner')
-          )
-        );
-
-      if (owners.length <= 1) {
-        throw new BadRequestError(
-          'Cannot remove the last owner of the organization. Transfer ownership or assign another owner first.'
-        );
-      }
+    if (targetMembership.role === 'owner' && org.role !== 'owner') {
+      throw new ForbiddenError('Only an owner can remove another owner');
     }
 
-    await db
-      .delete(organizationMemberships)
-      .where(
-        and(
-          eq(organizationMemberships.organizationId, organizationId),
-          eq(organizationMemberships.userId, targetUserId)
-        )
-      );
+    await db.transaction(async (tx) => {
+      if (targetMembership.role === 'owner') {
+        // Lock every owner row (always in id order, so two concurrent removals cannot deadlock) and
+        // count again under the lock: of two concurrent owner removals, the second sees the first's
+        // delete and stops, so the organization always keeps an owner.
+        const owners = await tx
+          .select({ userId: organizationMemberships.userId })
+          .from(organizationMemberships)
+          .where(and(eq(organizationMemberships.organizationId, organizationId), eq(organizationMemberships.role, 'owner')))
+          .orderBy(asc(organizationMemberships.id))
+          .for('update');
+
+        if (owners.length <= 1 && owners.some((o) => o.userId === targetUserId)) {
+          throw new BadRequestError(
+            'Cannot remove the last owner of the organization. Transfer ownership or assign another owner first.'
+          );
+        }
+      }
+
+      const removed = await tx
+        .delete(organizationMemberships)
+        .where(and(eq(organizationMemberships.organizationId, organizationId), eq(organizationMemberships.userId, targetUserId)))
+        .returning({ id: organizationMemberships.id });
+      if (removed.length === 0) {
+        throw new NotFoundError('Target user is not a member of this organization');
+      }
+    });
 
     return { success: true };
   }
