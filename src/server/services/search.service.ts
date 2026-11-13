@@ -1,15 +1,24 @@
 import { db } from '@/db/client';
-import { tasks, projects, workflowStatuses, users } from '@/db/schema';
+import { tasks, users } from '@/db/schema';
 import { ProjectService } from './project.service';
-import { eq, and, sql, ilike, or, inArray } from 'drizzle-orm';
+import { eq, and, sql, ilike, or, inArray, desc, SQL } from 'drizzle-orm';
+import type { SearchQuery } from '@/server/validation/schemas';
+
+const MAX_TASK_RESULTS = 50;
+
+// Escapes LIKE wildcards so "%" or "_" in a query match literally.
+export function likePattern(query: string): string {
+  return `%${query.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+}
 
 export class SearchService {
   static async searchResources(
     userId: string,
     organizationId: string,
     query: string,
-    filters?: { projectId?: string; statusId?: string; priority?: string; assigneeId?: string }
+    filters?: Pick<SearchQuery, 'projectId' | 'statusId' | 'priority' | 'assigneeId'>
   ) {
+    const text = query.trim();
     // 1. Get all projects user has access to
     const accessibleProjects = await ProjectService.getAccessibleProjects(userId, organizationId);
     if (accessibleProjects.length === 0) {
@@ -27,21 +36,23 @@ export class SearchService {
       targetProjectIds = [filters.projectId];
     }
 
-    const searchTerm = `%${query.trim()}%`;
-
-    // 2. Search projects
-    const matchedProjects = accessibleProjects.filter(
-      (p) =>
-        p.name.toLowerCase().includes(query.toLowerCase()) ||
-        (p.description && p.description.toLowerCase().includes(query.toLowerCase()))
-    );
+    // 2. Search projects (only for a text query; filters apply to tasks)
+    const needle = text.toLowerCase();
+    const matchedProjects = text
+      ? accessibleProjects.filter(
+          (p) => p.name.toLowerCase().includes(needle) || (p.description?.toLowerCase().includes(needle) ?? false)
+        )
+      : [];
 
     // 3. Search tasks across accessible projects
-    const taskConditions = [
+    const taskConditions: (SQL | undefined)[] = [
       inArray(tasks.projectId, targetProjectIds),
       sql`${tasks.deletedAt} IS NULL`,
-      or(ilike(tasks.title, searchTerm), ilike(tasks.description, searchTerm)),
     ];
+    if (text) {
+      const pattern = likePattern(text);
+      taskConditions.push(or(ilike(tasks.title, pattern), ilike(tasks.description, pattern)));
+    }
 
     if (filters?.statusId) {
       taskConditions.push(eq(tasks.statusId, filters.statusId));
@@ -70,7 +81,8 @@ export class SearchService {
       .from(tasks)
       .leftJoin(users, eq(tasks.assigneeId, users.id))
       .where(and(...taskConditions))
-      .limit(50);
+      .orderBy(desc(tasks.updatedAt), desc(tasks.id))
+      .limit(MAX_TASK_RESULTS);
 
     return {
       projects: matchedProjects,
