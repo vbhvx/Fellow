@@ -50,7 +50,7 @@ The request path relays immediately after commit, which gives low latency. The w
 
 Each web instance opens one dedicated `LISTEN fellow_events` connection the first time a client subscribes, and forwards notifications into its in-process broker. Postgres caps NOTIFY payloads at 8000 bytes, so larger envelopes (for example, a task with a long description) are sent as `{ ref: seq }` and loaded from the outbox by each listener.
 
-If the listener connection drops, it reconnects with exponential backoff. Anything it missed is recovered by client replay (below).
+If the listener connection drops, it reconnects with exponential backoff (0.5 s doubling to 30 s), and keeps retrying through failed attempts until it is connected or stopped. Anything it missed is recovered by client replay (below). The connection shows in `pg_stat_activity` as `fellow-event-bus-<pid>`.
 
 Previously, the broker was an in-memory singleton fed directly by the process that made the change. The worker ran as a separate process, so its "recovery" broadcasts went into an empty broker and reached nobody. A second web instance had the same problem.
 
@@ -72,7 +72,9 @@ Previously, the broker was an in-memory singleton fed directly by the process th
 
 - De-duplicates by `seq` (bounded set), because replay and live delivery may overlap.
 - On `system.resync`, refetches canonical state.
-- The board applies `task.updated` / `task.moved` only if the event's `version` is at least the local version, so a late event can never roll a card back.
+- **Reconnects by itself when the browser gives up.** A dropped stream is retried by the browser, which sends `Last-Event-ID`. But when a reconnect is *refused* (401, 403, or a 503 while the event bus is down), `EventSource` stops for good. The hook detects that (`readyState === CLOSED`) and opens a new stream with backoff (1 s doubling to 30 s), passing the last seen `seq` as `?lastEventId=` so the gap is replayed. With no seq to resume from, it refetches instead.
+- The board applies `task.updated` / `task.moved` only if the event's `version` is at least the local version, so a late event can never roll a card back. It also remembers tasks it has seen deleted: an update relayed just after a delete is ignored rather than bringing the card back.
+- A failed optimistic move reverts only that card (unless a newer version of it has arrived), so other moves and live updates made meanwhile are kept.
 
 ## Delivery semantics
 

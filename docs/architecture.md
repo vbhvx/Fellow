@@ -144,6 +144,21 @@ export const PATCH = route<{ taskId: string }>(async (req, { params }) => {
 
 No global store: no state is shared across pages except what the URL and the session already carry.
 
+### Lifecycles and their guards
+
+Several records move through states encoded as nullable timestamps. Each transition is a single
+conditional statement (`UPDATE ... WHERE <expected state> RETURNING`) or runs under a row lock, so
+concurrent requests cannot both make it:
+
+| Record | States | Guard |
+|---|---|---|
+| Invitation | pending → accepted / expired (revoked is reserved: no endpoint sets it) | one `UPDATE` that requires pending; membership via the unique (org, user) key |
+| Task | live ⇄ completed → deleted | version compare-and-swap that also requires `deleted_at IS NULL`; delete bumps the version; `completedAt` kept while the task stays in completed columns |
+| Project | active ⇄ archived | archived projects are read-only (`ProjectService.assertWritable`) until unarchived |
+| Workflow column | exactly one default per project | project row locked while the default changes |
+| Organization owners | at least one | owner rows locked (in id order) while removing an owner |
+| Outbox event | pending → retrying → delivered / dead-lettered | `FOR UPDATE SKIP LOCKED`, `next_attempt_at`, `failed_at` |
+
 ### Configuration
 
 `src/server/config/env.ts` validates every variable with Zod; `instrumentation.ts` checks it at

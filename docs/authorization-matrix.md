@@ -42,5 +42,5 @@
 1. **Independent Identity:** A user may be an `Owner` in Organization A and a `Viewer` in Organization B. Permissions are strictly evaluated per organization context.
 2. **Assignment Integrity:** A user from Organization B cannot be assigned to a task in Organization A (`BadRequestError`).
 3. **Immediate Revocation:** Removing a user from an organization immediately invalidates their session access to all organization projects, tasks, comments, and real-time streams.
-4. **Ownership Protection:** An organization must always have at least one `Owner`. An operation attempting to remove or downgrade the last remaining owner is rejected (`BadRequestError`).
+4. **Ownership Protection:** An organization must always have at least one `Owner`. Removing the last remaining owner is rejected (`BadRequestError`); the check runs under a lock on the owner rows, so two concurrent removals cannot both succeed. Only an `Owner` can remove another `Owner`.
 
