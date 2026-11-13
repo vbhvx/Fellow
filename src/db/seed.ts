@@ -85,13 +85,13 @@ export async function seedDatabase() {
     visibility: 'organization',
   });
 
-  const privateProject = await ProjectService.createProject(alice.id, acmeOrg.id, {
+  await ProjectService.createProject(alice.id, acmeOrg.id, {
     name: 'Q4 Board Strategy (Confidential)',
     description: 'Executive roadmap and acquisition review. Private project for leadership.',
     visibility: 'private',
   });
 
-  const starlightApp = await ProjectService.createProject(david.id, starlightOrg.id, {
+  await ProjectService.createProject(david.id, starlightOrg.id, {
     name: 'Mobile Streaming App',
     description: 'Cross-platform iOS and Android video streaming player.',
     visibility: 'organization',
@@ -112,7 +112,7 @@ export async function seedDatabase() {
     dueAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
   });
 
-  const t2 = await TaskService.createTask(alice.id, corePlatform.id, {
+  await TaskService.createTask(alice.id, corePlatform.id, {
     title: 'Deterministic Fractional Drag-and-Drop Reordering',
     description: 'Calculate midpoints and trigger rebalance when key gap is compressed.',
     statusId: inProgress.id,
@@ -120,7 +120,7 @@ export async function seedDatabase() {
     assigneeId: charlie.id,
   });
 
-  const t3 = await TaskService.createTask(bob.id, corePlatform.id, {
+  await TaskService.createTask(bob.id, corePlatform.id, {
     title: 'Setup PostgreSQL Connection Pool',
     description: 'Configured pg.Pool with 20 connections and health check ping.',
     statusId: done.id,
