@@ -4,7 +4,7 @@ import {
   rebalancePositions,
   INITIAL_POSITION,
   MIN_POSITION_GAP,
-} from '@/server/ordering/fractional-index';
+} from '@/shared/fractional-index';
 
 describe('Fractional Indexing & Deterministic Task Reordering', () => {
   it('assigns initial position for first item in empty column', () => {

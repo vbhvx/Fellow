@@ -1,3 +1,6 @@
+// Fractional ordering of cards within a column. Shared: the server computes the canonical
+// position, and the board uses the same rule to place a dropped card before the server replies.
+
 export const INITIAL_POSITION = 1000.0;
 export const POSITION_STEP = 1000.0;
 export const MIN_POSITION_GAP = 0.0001;

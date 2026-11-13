@@ -14,7 +14,7 @@ import {
   rebalancePositions,
   INITIAL_POSITION,
   POSITION_STEP,
-} from '@/server/ordering/fractional-index';
+} from '@/shared/fractional-index';
 import { recordOutboxEvent, publishEvent } from '@/server/events/outbox';
 import {
   BadRequestError,
