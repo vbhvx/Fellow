@@ -1,5 +1,5 @@
 import { db } from '@/db/client';
-import { workflowStatuses } from '@/db/schema';
+import { projects, workflowStatuses } from '@/db/schema';
 import { ProjectService } from './project.service';
 import { permissions } from '@/server/authorization/permissions';
 import { BadRequestError, ForbiddenError, NotFoundError } from '@/server/errors/app-error';
@@ -26,6 +26,7 @@ export class WorkflowService {
     data: { name: string; key: string; category?: StatusCategory; position?: number; isDefault?: boolean }
   ) {
     const ctx = await ProjectService.getProjectContext(userId, projectId);
+    ProjectService.assertWritable(ctx);
     if (!permissions.canManageWorkflow(ctx.orgMemCtx, ctx.projCtx, ctx.projMemCtx)) {
       throw new ForbiddenError('You do not have permission to manage workflow statuses in this project');
     }
@@ -47,21 +48,34 @@ export class WorkflowService {
       pos = maxPos + 1000.0;
     }
 
-    const [status] = await db
-      .insert(workflowStatuses)
-      .values({
-        id: `status_${crypto.randomUUID()}`,
-        organizationId: ctx.project.organizationId,
-        projectId,
-        name: data.name,
-        key: data.key,
-        category: data.category || 'unstarted',
-        position: pos,
-        isDefault: data.isDefault || false,
-      })
-      .returning();
+    const position = pos;
+    return await db.transaction(async (tx) => {
+      // A project has exactly one default column. Locking the project row serializes default
+      // changes, so two concurrent "make this the default" requests cannot both win.
+      if (data.isDefault) {
+        await tx.select({ id: projects.id }).from(projects).where(eq(projects.id, projectId)).for('update');
+        await tx
+          .update(workflowStatuses)
+          .set({ isDefault: false })
+          .where(and(eq(workflowStatuses.projectId, projectId), eq(workflowStatuses.isDefault, true)));
+      }
 
-    return status;
+      const [status] = await tx
+        .insert(workflowStatuses)
+        .values({
+          id: `status_${crypto.randomUUID()}`,
+          organizationId: ctx.project.organizationId,
+          projectId,
+          name: data.name,
+          key: data.key,
+          category: data.category || 'unstarted',
+          position,
+          isDefault: data.isDefault || false,
+        })
+        .returning();
+
+      return status;
+    });
   }
 
   static async updateWorkflowStatus(
@@ -71,6 +85,7 @@ export class WorkflowService {
     data: { name?: string; category?: StatusCategory; position?: number }
   ) {
     const ctx = await ProjectService.getProjectContext(userId, projectId);
+    ProjectService.assertWritable(ctx);
     if (!permissions.canManageWorkflow(ctx.orgMemCtx, ctx.projCtx, ctx.projMemCtx)) {
       throw new ForbiddenError('You do not have permission to manage workflow statuses in this project');
     }
