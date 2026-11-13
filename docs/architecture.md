@@ -47,8 +47,8 @@ claim row + pg_notify          backoff, dead-letter            Filtered by curre
 ### 1. Presentation & Optimistic UI Layer
 - Built with React, Next.js App Router, Tailwind CSS, and `@hello-pangea/dnd`.
 - Captures user intent (e.g. task reordering, status movement, inline edits).
-- Optimistically updates UI state for immediate responsiveness.
-- Reconciles state when canonical response arrives; safely rolls back and triggers state refresh if a concurrency conflict (409) or authorization error occurs.
+- Optimistically updates UI state for immediate responsiveness, using the same fractional-ordering rule as the server (`src/shared/fractional-index.ts`).
+- Reconciles state when the canonical response arrives; rolls back on a concurrency conflict (409) or any other failure.
 
 ### 2. Authorization & Tenant Security Boundary
 - Every API endpoint invokes centralized policies (`canViewOrganization`, `canViewProject`, `canEditTask`, `canReorderTask`, etc.).
@@ -74,4 +74,91 @@ claim row + pg_notify          backoff, dead-letter            Filtered by curre
 - Resolves all projects the subscriber is authorized to access (including private project memberships).
 - Filters every outbound event: private project events are never dispatched to organization members who lack project permissions.
 - Heartbeat ping comments (`: ping\n\n`) are sent every 15 seconds to prevent browser and reverse-proxy timeouts.
+
+## Code organization
+
+```text
+src/
+  app/                    Next.js routes: pages, and the REST API under app/api/v1
+    api/v1/**/route.ts    HTTP only: auth, validation, one service call, the response
+    error.tsx, not-found.tsx, global-error.tsx   error UI
+  features/board/         the Kanban board: components, useProjectBoard, pure board-state
+  components/             UI shared by several pages (Navbar, Modal, ErrorAlert)
+  lib/
+    api/                  browser API layer: client (fetch + ApiError), endpoints, types
+    use-realtime.ts       SSE subscription with seq de-duplication and resync
+  shared/                 code with no server or browser dependency, used by both
+  server/
+    http/route.ts         route() error boundary, parseBody / parseQuery
+    auth/                 sessions (JWT cookie or bearer), requireUser
+    authorization/        the permission policy, one function per decision
+    services/             business rules and data access, one class per resource
+    validation/schemas.ts every request schema, and the types derived from them
+    events/, realtime/    transactional outbox, NOTIFY bus, SSE broker
+    errors/, security/, config/, observability/
+  db/                     Drizzle schema, pool, versioned SQL migrations, seed
+workers/outbox/           the relay worker (a separate process)
+tests/                    Vitest against a real PostgreSQL
+```
+
+Dependencies point one way: `app` → `features`/`components` → `lib` → `shared` on the client, and
+`app/api` → `server/http` → `server/services` → `db` on the server. Nothing under `src/server` is
+imported by client code except types (`import type`), which are erased at build time.
+
+### The request path
+
+```ts
+export const PATCH = route<{ taskId: string }>(async (req, { params }) => {
+  const session = await requireUser(req);                        // 401 without a session
+  const input = await parseBody(req, updateTaskSchema, 'Invalid update input'); // 400 / 422
+  const task = await TaskService.updateTask(session.userId, params.taskId, input);
+  return NextResponse.json({ task });
+});
+```
+
+- **Handlers** hold no logic and no try/catch. `route()` turns anything thrown into the standard
+  error body (below).
+- **Services** check permissions through `permissions.*`, run queries, and write the change, its
+  activity row, notifications and the outbox event in one transaction. Data access stays in the
+  services rather than a separate repository layer: the outbox guarantee depends on the domain
+  write and the event sharing a transaction, and the concurrency tests pin that behavior.
+- **Schemas** live in `server/validation/schemas.ts`; service input types come from them.
+
+### Errors
+
+| Where | How |
+|---|---|
+| API | Services throw `AppError` subclasses (`NotFoundError`, `ConflictError`, ...). `route()` returns `{ error: { code, message, requestId, details? } }` with the matching status; a malformed JSON body is 400, a schema mismatch 422 with per-field `details`, anything unexpected a logged 500 that reveals nothing internal. Every response carries `x-request-id`. |
+| Browser API layer | Non-2xx responses become `ApiError` (status, code, message). `errorMessage(err)` gives the text to show, `isConflict(err)` detects a 409. |
+| Pages | Load failures render an `ErrorAlert` with the API's message; failed optimistic moves roll back. Fire-and-forget calls (notifications, the org list) fall back to an empty state instead of rejecting unhandled. |
+| Rendering bugs | `app/error.tsx` catches them per route, `global-error.tsx` if the root layout fails. |
+
+### State
+
+| Kind | Where it lives |
+|---|---|
+| Server state (projects, cards, members) | Fetched per page through `lib/api/endpoints`; the board's lives in `useProjectBoard`, kept current by realtime events. |
+| Realtime | `useRealtime` de-duplicates by `seq`; `applyRealtimeEvent` / `upsertCard` merge events and responses by `version`, so neither a duplicate nor a stale update can win. |
+| URL state | The active organization (`/dashboard?org=`), the open task (`?task=`), route params. |
+| Local view state | Filters, open dialogs, form fields: `useState` in the page. |
+
+No global store: no state is shared across pages except what the URL and the session already carry.
+
+### Configuration
+
+`src/server/config/env.ts` validates every variable with Zod; `instrumentation.ts` checks it at
+boot and exits in production when it is invalid. `.env.example` lists each variable; tests set
+their own in `vitest.config.mts`.
+
+### Commands
+
+| Command | Does |
+|---|---|
+| `npm run dev` | Next.js dev server |
+| `npm run db:migrate` / `npm run db:seed` | apply migrations / load demo data |
+| `npm run worker:outbox` | run the outbox relay worker |
+| `npm test` | all tests (needs PostgreSQL, see `.env.example`) |
+| `npm run lint`, `npm run typecheck` | ESLint, and TypeScript with unused-code checks |
+| `npm run verify` | lint, typecheck and tests, as CI runs them |
+| `npm run build` | production build |
 

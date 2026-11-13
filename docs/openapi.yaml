@@ -418,6 +418,9 @@ paths:
   /search:
     get:
       summary: Search accessible projects and tasks
+      description: >
+        Without q, the filters alone select tasks and no projects are returned (assigneeId=me lists the
+        caller's tasks). "%" and "_" in q match literally. Up to 50 tasks, most recently updated first.
       parameters:
         - name: organizationId
           in: query
@@ -426,12 +429,33 @@ paths:
             type: string
         - name: q
           in: query
-          required: true
+          required: false
+          schema:
+            type: string
+            maxLength: 200
+        - name: projectId
+          in: query
+          schema:
+            type: string
+        - name: statusId
+          in: query
+          schema:
+            type: string
+        - name: priority
+          in: query
+          schema:
+            type: string
+            enum: [urgent, high, medium, low, none]
+        - name: assigneeId
+          in: query
+          description: A user id, or "me" for the signed-in user
           schema:
             type: string
       responses:
         '200':
           description: Filtered search results strictly within access scope
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
   /notifications:
     get:
       summary: List user notifications
@@ -451,7 +475,34 @@ paths:
         '200':
           description: Continuous text/event-stream of authorized collaboration events
 components:
+  schemas:
+    Error:
+      description: The body of every error response
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, requestId]
+          properties:
+            code:
+              type: string
+              enum: [UNAUTHORIZED, FORBIDDEN, NOT_FOUND, CONFLICT, VALIDATION_ERROR, BAD_REQUEST, RATE_LIMITED, INTERNAL_SERVER_ERROR]
+            message:
+              type: string
+            requestId:
+              type: string
+              description: Also sent as the x-request-id header; quote it when reporting a problem
+            details:
+              description: For VALIDATION_ERROR, the messages for each invalid field
+              type: object
   responses:
+    ValidationFailed:
+      description: The body or query failed validation (a malformed JSON body is a 400 instead)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
     RateLimited:
       description: Too many attempts; retry after the number of seconds in the Retry-After header
       headers:
