@@ -1,19 +1,13 @@
 'use client';
 
 import React from 'react';
-import { Calendar, User, MessageSquare, AlertCircle, ArrowRight } from 'lucide-react';
+import { Calendar } from 'lucide-react';
+import type { WorkflowStatus } from '@/lib/api/types';
+import type { BoardCard } from './board-state';
 
 interface TaskCardProps {
-  task: {
-    id: string;
-    title: string;
-    priority: string;
-    assigneeName?: string | null;
-    dueAt?: string | null;
-    version: number;
-    statusId: string;
-  };
-  workflowStatuses?: Array<{ id: string; name: string }>;
+  task: BoardCard;
+  workflowStatuses?: WorkflowStatus[];
   onClick: () => void;
   onMoveToStatus?: (statusId: string) => void;
 }
@@ -29,8 +23,10 @@ export function TaskCard({ task, workflowStatuses = [], onClick, onMoveToStatus 
         return <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-700">High</span>;
       case 'medium':
         return <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-blue-100 text-blue-700">Medium</span>;
-      default:
+      case 'low':
         return <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-600">Low</span>;
+      default:
+        return <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-600">No priority</span>;
     }
   };
 

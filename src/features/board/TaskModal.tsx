@@ -1,39 +1,33 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import {
-  X,
-  Calendar,
-  User,
-  AlertTriangle,
-  History,
-  MessageSquare,
-  Trash2,
-  Save,
-  CheckCircle2,
-  Clock,
-  ArrowRight,
-} from 'lucide-react';
-import { apiRequest } from '@/lib/api-client';
+import { X, AlertTriangle, History, MessageSquare, Trash2, Save } from 'lucide-react';
+import { errorMessage, isConflict } from '@/lib/api/client';
+import { tasksApi } from '@/lib/api/endpoints';
+import type { Comment, ProjectMember, TaskActivity, TaskDetail, WorkflowStatus } from '@/lib/api/types';
+import { TASK_PRIORITIES } from './board-state';
 
 interface TaskModalProps {
   taskId: string;
-  projectId: string;
-  workflowStatuses: Array<{ id: string; name: string }>;
-  projectMembers: Array<{ userId: string; name: string; email: string }>;
+  workflowStatuses: WorkflowStatus[];
+  projectMembers: ProjectMember[];
   onClose: () => void;
+  /** Called after a save, so the board can pick up fields its realtime events do not carry. */
   onTaskUpdated?: () => void;
+  onTaskDeleted?: (taskId: string) => void;
 }
+
+const priorityLabel = (p: string) => (p === 'none' ? 'None' : p.charAt(0).toUpperCase() + p.slice(1));
 
 export function TaskModal({
   taskId,
-  projectId,
   workflowStatuses,
   projectMembers,
   onClose,
   onTaskUpdated,
+  onTaskDeleted,
 }: TaskModalProps) {
-  const [task, setTask] = useState<any>(null);
+  const [task, setTask] = useState<TaskDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -49,17 +43,16 @@ export function TaskModal({
 
   // Tabs: 'details' | 'activity'
   const [activeTab, setActiveTab] = useState<'details' | 'activity'>('details');
-  const [comments, setComments] = useState<any[]>([]);
+  const [comments, setComments] = useState<Comment[]>([]);
   const [newComment, setNewComment] = useState('');
-  const [activities, setActivities] = useState<any[]>([]);
+  const [activities, setActivities] = useState<TaskActivity[]>([]);
 
   const loadTask = useCallback(async () => {
     setLoading(true);
     setError(null);
     setConflictError(null);
     try {
-      const res = await apiRequest(`/api/v1/tasks/${taskId}`);
-      const t = res.task;
+      const t = await tasksApi.get(taskId);
       setTask(t);
       setTitle(t.title);
       setDescription(t.description || '');
@@ -69,50 +62,45 @@ export function TaskModal({
       setDueAt(t.dueAt ? t.dueAt.substring(0, 10) : '');
 
       // Load comments & activities
-      const [cRes, aRes] = await Promise.all([
-        apiRequest(`/api/v1/tasks/${taskId}/comments`),
-        apiRequest(`/api/v1/tasks/${taskId}/activity`),
-      ]);
-      setComments(cRes.comments || []);
-      setActivities(aRes.activities || []);
-    } catch (err: any) {
-      setError(err.message);
+      const [c, a] = await Promise.all([tasksApi.comments(taskId), tasksApi.activity(taskId)]);
+      setComments(c);
+      setActivities(a);
+    } catch (err) {
+      setError(errorMessage(err, 'Failed to load the task'));
     } finally {
       setLoading(false);
     }
   }, [taskId]);
 
   useEffect(() => {
-    loadTask();
+    void loadTask();
   }, [loadTask]);
 
   const handleSave = async () => {
+    if (!task) return;
     setSaving(true);
     setError(null);
     setConflictError(null);
     try {
-      await apiRequest(`/api/v1/tasks/${taskId}`, {
-        method: 'PATCH',
-        body: JSON.stringify({
-          title,
-          description: description || null,
-          statusId,
-          priority,
-          assigneeId: assigneeId || null,
-          dueAt: dueAt ? new Date(dueAt).toISOString() : null,
-          version: task.version, // Concurrency verification!
-        }),
+      await tasksApi.update(taskId, {
+        title,
+        description: description || null,
+        statusId,
+        priority,
+        assigneeId: assigneeId || null,
+        dueAt: dueAt ? new Date(dueAt).toISOString() : null,
+        version: task.version, // the server rejects the save if someone else changed the task first
       });
 
-      if (onTaskUpdated) onTaskUpdated();
+      onTaskUpdated?.();
       await loadTask();
-    } catch (err: any) {
-      if (err.statusCode === 409 || err.code === 'CONFLICT') {
+    } catch (err) {
+      if (isConflict(err)) {
         setConflictError(
           'This task was modified by another collaborator while you were editing. Please reload to see the latest changes.'
         );
       } else {
-        setError(err.message);
+        setError(errorMessage(err));
       }
     } finally {
       setSaving(false);
@@ -124,28 +112,23 @@ export function TaskModal({
     if (!newComment.trim()) return;
 
     try {
-      const res = await apiRequest(`/api/v1/tasks/${taskId}/comments`, {
-        method: 'POST',
-        body: JSON.stringify({ content: newComment.trim() }),
-      });
-      setComments((prev) => [...prev, res.comment]);
+      const comment = await tasksApi.addComment(taskId, newComment.trim());
+      setComments((prev) => [...prev, comment]);
       setNewComment('');
-      // Refresh activities
-      const aRes = await apiRequest(`/api/v1/tasks/${taskId}/activity`);
-      setActivities(aRes.activities || []);
-    } catch (err: any) {
-      setError(err.message);
+      setActivities(await tasksApi.activity(taskId));
+    } catch (err) {
+      setError(errorMessage(err));
     }
   };
 
   const handleDelete = async () => {
     if (!confirm('Are you sure you want to delete this task?')) return;
     try {
-      await apiRequest(`/api/v1/tasks/${taskId}`, { method: 'DELETE' });
-      if (onTaskUpdated) onTaskUpdated();
+      await tasksApi.remove(taskId);
+      onTaskDeleted?.(taskId);
       onClose();
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err) {
+      setError(errorMessage(err));
     }
   };
 
@@ -189,6 +172,7 @@ export function TaskModal({
             </button>
             <button
               onClick={onClose}
+              aria-label="Close"
               className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
             >
               <X className="w-5 h-5" />
@@ -263,11 +247,11 @@ export function TaskModal({
                     onChange={(e) => setPriority(e.target.value)}
                     className="w-full text-xs font-medium bg-white border border-slate-200 rounded-md px-2 py-1.5 focus:outline-none capitalize"
                   >
-                    <option value="urgent">Urgent</option>
-                    <option value="high">High</option>
-                    <option value="medium">Medium</option>
-                    <option value="low">Low</option>
-                    <option value="none">None</option>
+                    {TASK_PRIORITIES.map((p) => (
+                      <option key={p} value={p}>
+                        {priorityLabel(p)}
+                      </option>
+                    ))}
                   </select>
                 </div>
 
@@ -389,7 +373,7 @@ export function TaskModal({
                         </span>
                       </div>
                       <p className="text-slate-600 capitalize">
-                        Event: <span className="font-medium text-slate-800">{act.eventType.replace('_', ' ')}</span>
+                        Event: <span className="font-medium text-slate-800">{act.eventType.replaceAll('_', ' ')}</span>
                       </p>
                       {act.previousValue && act.newValue && (
                         <p className="text-[11px] text-slate-500 mt-0.5">

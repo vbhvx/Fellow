@@ -1,106 +1,105 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import {
-  Bell,
-  Search,
-  Building2,
-  CheckCircle2,
-  AlertCircle,
-  LogOut,
-  Settings,
-  Plus,
-  BookOpen,
-  Wifi,
-  WifiOff,
-} from 'lucide-react';
-import { apiRequest } from '@/lib/api-client';
-
-interface Organization {
-  id: string;
-  name: string;
-  slug: string;
-  role: string;
-}
-
-interface Notification {
-  id: string;
-  title: string;
-  message: string;
-  readAt: string | null;
-  createdAt: string;
-}
+import { Bell, Search, Building2, LogOut, Settings, BookOpen, Wifi, WifiOff } from 'lucide-react';
+import { ApiError } from '@/lib/api/client';
+import { authApi, notificationsApi, organizationsApi, searchApi } from '@/lib/api/endpoints';
+import type { Notification, Organization, SearchResults, User } from '@/lib/api/types';
+import type { RealtimeStatus } from '@/lib/use-realtime';
 
 interface NavbarProps {
   currentOrgId?: string;
-  realtimeStatus?: 'connected' | 'connecting' | 'disconnected';
+  realtimeStatus?: RealtimeStatus;
   onOrgChange?: (orgId: string) => void;
 }
 
+const NO_RESULTS: SearchResults = { projects: [], tasks: [] };
+
 export function Navbar({ currentOrgId, realtimeStatus = 'disconnected', onOrgChange }: NavbarProps) {
   const router = useRouter();
-  const [user, setUser] = useState<{ id: string; name: string; email: string } | null>(null);
+  const [user, setUser] = useState<User | null>(null);
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [showNotifications, setShowNotifications] = useState(false);
   const [showSearchModal, setShowSearchModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<{ projects: any[]; tasks: any[] }>({ projects: [], tasks: [] });
+  const [searchResults, setSearchResults] = useState<SearchResults>(NO_RESULTS);
   const [searching, setSearching] = useState(false);
+  // Each keystroke searches; only the newest request may write results.
+  const searchSeq = useRef(0);
 
   useEffect(() => {
-    // Load current user and organizations
-    apiRequest('/api/v1/me')
-      .then((res) => setUser(res.user))
-      .catch(() => router.push('/login'));
-
-    apiRequest('/api/v1/organizations')
-      .then((res) => {
-        setOrganizations(res.organizations || []);
-      })
-      .catch(() => {});
+    authApi
+      .me()
+      .then(setUser)
+      // Only a missing session means "sign in again"; a network blip should not log the user out.
+      .catch((err) => {
+        if (err instanceof ApiError && err.statusCode === 401) router.push('/login');
+      });
+    // The switcher is optional chrome: without it the page still works.
+    organizationsApi.list().then(setOrganizations, () => setOrganizations([]));
   }, [router]);
 
   useEffect(() => {
-    if (currentOrgId) {
-      apiRequest(`/api/v1/notifications?organizationId=${currentOrgId}`)
-        .then((res) => setNotifications(res.notifications || []))
-        .catch(() => {});
-    }
+    if (!currentOrgId) return;
+    notificationsApi.list(currentOrgId).then(setNotifications, () => setNotifications([]));
   }, [currentOrgId]);
+
+  // ⌘K / Ctrl+K opens search and Escape closes it, as the hints in the bar say.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setShowSearchModal(true);
+      } else if (e.key === 'Escape') {
+        setShowSearchModal(false);
+        setShowNotifications(false);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   const unreadCount = notifications.filter((n) => !n.readAt).length;
 
   const handleLogout = async () => {
-    await apiRequest('/api/v1/auth/logout', { method: 'POST' });
-    router.push('/login');
+    // The cookie is httpOnly; if the request fails the session stays, so only leave on success.
+    try {
+      await authApi.logout();
+      router.push('/login');
+    } catch {
+      window.alert('Could not sign out. Check your connection and try again.');
+    }
   };
 
   const markAllRead = async () => {
     if (!currentOrgId) return;
-    await apiRequest('/api/v1/notifications/read-all', {
-      method: 'POST',
-      body: JSON.stringify({ organizationId: currentOrgId }),
-    });
-    setNotifications((prev) => prev.map((n) => ({ ...n, readAt: new Date().toISOString() })));
+    try {
+      await notificationsApi.markAllRead(currentOrgId);
+      setNotifications((prev) => prev.map((n) => ({ ...n, readAt: n.readAt ?? new Date().toISOString() })));
+    } catch {
+      // Leave them unread; the badge stays accurate and the user can retry.
+    }
   };
 
   const handleSearch = async (q: string) => {
     setSearchQuery(q);
+    const seq = ++searchSeq.current;
     if (!q.trim() || !currentOrgId) {
-      setSearchResults({ projects: [], tasks: [] });
+      setSearchResults(NO_RESULTS);
+      setSearching(false);
       return;
     }
     setSearching(true);
     try {
-      const res = await apiRequest(`/api/v1/search?organizationId=${currentOrgId}&q=${encodeURIComponent(q)}`);
-      setSearchResults(res);
+      const results = await searchApi.search({ organizationId: currentOrgId, q });
+      if (seq === searchSeq.current) setSearchResults(results);
     } catch {
-      setSearchResults({ projects: [], tasks: [] });
+      if (seq === searchSeq.current) setSearchResults(NO_RESULTS);
     } finally {
-      setSearching(false);
+      if (seq === searchSeq.current) setSearching(false);
     }
   };
 
@@ -194,6 +193,7 @@ export function Navbar({ currentOrgId, realtimeStatus = 'disconnected', onOrgCha
           <div className="relative">
             <button
               onClick={() => setShowNotifications(!showNotifications)}
+              aria-label="Notifications"
               className="relative p-2 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors"
               title="Notifications"
             >
@@ -259,6 +259,7 @@ export function Navbar({ currentOrgId, realtimeStatus = 'disconnected', onOrgCha
               </div>
               <button
                 onClick={handleLogout}
+                aria-label="Log out"
                 className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg transition-colors"
                 title="Log Out"
               >

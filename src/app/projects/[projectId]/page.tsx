@@ -1,56 +1,19 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
-import { useParams, useRouter, useSearchParams } from 'next/navigation';
-import {
-  DragDropContext,
-  Droppable,
-  Draggable,
-  DropResult,
-} from '@hello-pangea/dnd';
-import {
-  Plus,
-  Filter,
-  Search,
-  Users,
-  Settings,
-  AlertCircle,
-  Wifi,
-  WifiOff,
-  SlidersHorizontal,
-  FolderKanban,
-  ArrowLeft,
-} from 'lucide-react';
+import React, { useState } from 'react';
+import { useParams, useSearchParams } from 'next/navigation';
+import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
+import { Plus, Search, ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
 import { Navbar } from '@/components/Navbar';
-import { TaskCard } from '@/components/TaskCard';
-import { TaskModal } from '@/components/TaskModal';
-import { useRealtime, CollaborationEvent } from '@/lib/use-realtime';
-import { apiRequest } from '@/lib/api-client';
+import { ErrorAlert } from '@/components/ErrorAlert';
+import { Modal, ModalActions } from '@/components/Modal';
+import { TaskCard } from '@/features/board/TaskCard';
+import { TaskModal } from '@/features/board/TaskModal';
+import { useProjectBoard } from '@/features/board/use-project-board';
+import { TASK_PRIORITIES, columnCards, filterCards, statusKeyFor } from '@/features/board/board-state';
 
-interface TaskItem {
-  id: string;
-  organizationId: string;
-  projectId: string;
-  statusId: string;
-  title: string;
-  description?: string | null;
-  priority: string;
-  createdBy: string;
-  assigneeId?: string | null;
-  dueAt?: string | null;
-  position: number;
-  version: number;
-  assigneeName?: string | null;
-}
-
-interface WorkflowStatusItem {
-  id: string;
-  name: string;
-  key: string;
-  category: string;
-  position: number;
-}
+const priorityLabel = (p: string) => (p === 'none' ? 'No priority' : p.charAt(0).toUpperCase() + p.slice(1));
 
 export default function ProjectBoardPage() {
   return (
@@ -63,246 +26,67 @@ export default function ProjectBoardPage() {
 function ProjectBoardContent() {
   const params = useParams();
   const searchParams = useSearchParams();
-  const router = useRouter();
   const projectId = params.projectId as string;
+  const board = useProjectBoard(projectId);
+  const { project, statuses, members, loading, error } = board;
 
-  const [project, setProject] = useState<any>(null);
-  const [statuses, setStatuses] = useState<WorkflowStatusItem[]>([]);
-  const [tasks, setTasks] = useState<TaskItem[]>([]);
-  const [members, setMembers] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  // Filters & search
+  // View state: filters and which dialog is open. Server state lives in useProjectBoard.
   const [searchQuery, setSearchQuery] = useState('');
   const [filterPriority, setFilterPriority] = useState<string>('all');
-  const [filterAssignee, setFilterAssignee] = useState<string>('all');
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(searchParams.get('task'));
 
-  // Modal states
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(searchParams.get('task') || null);
   const [showCreateTaskModal, setShowCreateTaskModal] = useState(false);
-  const [createColumnId, setCreateColumnId] = useState<string>('');
+  const [createColumnId, setCreateColumnId] = useState('');
   const [newTaskTitle, setNewTaskTitle] = useState('');
   const [newTaskPriority, setNewTaskPriority] = useState('medium');
   const [newTaskAssignee, setNewTaskAssignee] = useState('');
 
-  // Add column modal
   const [showAddColumnModal, setShowAddColumnModal] = useState(false);
   const [newColumnName, setNewColumnName] = useState('');
   const [newColumnKey, setNewColumnKey] = useState('');
 
-  // Initial data loading
-  const loadProjectData = useCallback(async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const [projRes, statRes, taskRes, memRes] = await Promise.all([
-        apiRequest(`/api/v1/projects/${projectId}`),
-        apiRequest(`/api/v1/projects/${projectId}/statuses`),
-        apiRequest(`/api/v1/projects/${projectId}/tasks`),
-        apiRequest(`/api/v1/projects/${projectId}/members`),
-      ]);
-
-      setProject(projRes.project);
-      setStatuses(statRes.statuses || []);
-      setTasks(taskRes.tasks || []);
-      setMembers(memRes.members || []);
-    } catch (err: any) {
-      setError(err.message || 'Failed to load project board');
-    } finally {
-      setLoading(false);
-    }
-  }, [projectId]);
-
-  useEffect(() => {
-    loadProjectData();
-  }, [loadProjectData]);
-
-  // Real-time Event Handling
-  const handleRealtimeEvent = useCallback(
-    (event: CollaborationEvent) => {
-      if (event.projectId && event.projectId !== projectId) {
-        return;
-      }
-
-      if (event.type === 'task.created') {
-        const newTask = event.payload.task as TaskItem;
-        setTasks((prev) => {
-          if (prev.some((t) => t.id === newTask.id)) return prev;
-          return [...prev, newTask];
-        });
-      } else if (event.type === 'task.updated' || event.type === 'task.moved') {
-        const updated = event.payload.task as TaskItem;
-        // Events can arrive out of order (e.g. replay after reconnect); never regress to an older version.
-        setTasks((prev) =>
-          prev.map((t) =>
-            t.id === updated.id && (updated.version ?? 0) >= (t.version ?? 0) ? { ...t, ...updated } : t
-          )
-        );
-      } else if (event.type === 'task.deleted') {
-        const delId = event.payload.taskId;
-        setTasks((prev) => prev.filter((t) => t.id !== delId));
-      }
-    },
-    [projectId]
-  );
-
-  const { status: realtimeStatus } = useRealtime(project?.organizationId, handleRealtimeEvent, loadProjectData);
-
-  // Drag and drop handler with optimistic UI updates
-  const handleDragEnd = async (result: DropResult) => {
-    const { destination, source, draggableId } = result;
-
+  const handleDragEnd = ({ destination, source, draggableId }: DropResult) => {
     if (!destination) return;
-    if (destination.droppableId === source.droppableId && destination.index === source.index) {
-      return;
-    }
-
-    const taskBeingMoved = tasks.find((t) => t.id === draggableId);
-    if (!taskBeingMoved) return;
-
-    // Snapshot original tasks for potential rollback
-    const originalTasks = [...tasks];
-
-    // Optimistically update tasks in state
-    const destStatusId = destination.droppableId;
-    const destColumnTasks = tasks
-      .filter((t) => t.statusId === destStatusId && t.id !== draggableId)
-      .sort((a, b) => a.position - b.position);
-
-    // Identify neighbors
-    const prevTask = destColumnTasks[destination.index - 1] || null;
-    const nextTask = destColumnTasks[destination.index] || null;
-
-    // Estimate new position for instant visual rendering
-    let estimatedPos = 1000.0;
-    if (prevTask && nextTask) estimatedPos = (prevTask.position + nextTask.position) / 2.0;
-    else if (prevTask) estimatedPos = prevTask.position + 1000.0;
-    else if (nextTask) estimatedPos = nextTask.position / 2.0;
-
-    const optimisticallyUpdated = tasks.map((t) => {
-      if (t.id === draggableId) {
-        return {
-          ...t,
-          statusId: destStatusId,
-          position: estimatedPos,
-        };
-      }
-      return t;
-    });
-
-    setTasks(optimisticallyUpdated);
-
-    try {
-      const moveRes = await apiRequest(`/api/v1/tasks/${draggableId}/move`, {
-        method: 'POST',
-        body: JSON.stringify({
-          statusId: destStatusId,
-          prevTaskId: prevTask?.id || null,
-          nextTaskId: nextTask?.id || null,
-          expectedVersion: taskBeingMoved.version,
-        }),
-      });
-
-      // Update with server confirmed version & canonical position
-      const canonicalTask = moveRes.task;
-      setTasks((prev) => prev.map((t) => (t.id === canonicalTask.id ? { ...t, ...canonicalTask } : t)));
-    } catch (err: any) {
-      // Rollback on conflict or failure!
-      console.error('Task move failed:', err);
-      setError(`Move failed: ${err.message}. Reconciling board state.`);
-      setTasks(originalTasks);
-    }
+    if (destination.droppableId === source.droppableId && destination.index === source.index) return;
+    void board.moveTask(draggableId, destination.droppableId, destination.index);
   };
 
-  // Keyboard accessibility move handler
-  const handleKeyboardMove = async (taskId: string, targetStatusId: string) => {
-    const task = tasks.find((t) => t.id === taskId);
-    if (!task) return;
-
-    const original = [...tasks];
-    setTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, statusId: targetStatusId } : t)));
-
-    try {
-      const res = await apiRequest(`/api/v1/tasks/${taskId}/move`, {
-        method: 'POST',
-        body: JSON.stringify({
-          statusId: targetStatusId,
-          expectedVersion: task.version,
-        }),
-      });
-      setTasks((prev) => prev.map((t) => (t.id === res.task.id ? { ...t, ...res.task } : t)));
-    } catch (err: any) {
-      setError(`Move failed: ${err.message}`);
-      setTasks(original);
-    }
+  const openCreateTask = (statusId: string) => {
+    setCreateColumnId(statusId);
+    setShowCreateTaskModal(true);
   };
 
   const handleCreateTask = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTaskTitle.trim() || !createColumnId) return;
-
-    try {
-      const res = await apiRequest(`/api/v1/projects/${projectId}/tasks`, {
-        method: 'POST',
-        body: JSON.stringify({
-          title: newTaskTitle.trim(),
-          statusId: createColumnId,
-          priority: newTaskPriority,
-          assigneeId: newTaskAssignee || null,
-        }),
-      });
-
-      setTasks((prev) => [...prev, res.task]);
+    const created = await board.createTask({
+      title: newTaskTitle.trim(),
+      statusId: createColumnId,
+      priority: newTaskPriority,
+      assigneeId: newTaskAssignee || null,
+    });
+    if (created) {
       setShowCreateTaskModal(false);
       setNewTaskTitle('');
       setNewTaskAssignee('');
-    } catch (err: any) {
-      setError(err.message);
     }
   };
 
   const handleAddColumn = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newColumnName.trim()) return;
-    const key = newColumnKey.trim() || newColumnName.toLowerCase().replace(/[^a-z0-9_]/g, '_');
-
-    try {
-      const res = await apiRequest(`/api/v1/projects/${projectId}/statuses`, {
-        method: 'POST',
-        body: JSON.stringify({
-          name: newColumnName.trim(),
-          key,
-          category: 'started',
-        }),
-      });
-
-      setStatuses((prev) => [...prev, res.status]);
+    if (await board.addColumn({ name: newColumnName, key: newColumnKey })) {
       setShowAddColumnModal(false);
       setNewColumnName('');
       setNewColumnKey('');
-    } catch (err: any) {
-      setError(err.message);
     }
   };
 
-  // Filter tasks
-  const filteredTasks = tasks.filter((t) => {
-    if (searchQuery && !t.title.toLowerCase().includes(searchQuery.toLowerCase())) {
-      return false;
-    }
-    if (filterPriority !== 'all' && t.priority !== filterPriority) {
-      return false;
-    }
-    if (filterAssignee !== 'all' && t.assigneeId !== filterAssignee) {
-      return false;
-    }
-    return true;
-  });
+  const visibleCards = filterCards(board.cards, { query: searchQuery, priority: filterPriority });
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
-      <Navbar currentOrgId={project?.organizationId} realtimeStatus={realtimeStatus} />
+      <Navbar currentOrgId={project?.organizationId} realtimeStatus={board.realtimeStatus} />
 
       {/* Board Header Bar */}
       <div className="bg-white border-b border-slate-200 px-4 sm:px-6 lg:px-8 py-4">
@@ -353,18 +137,16 @@ function ProjectBoardContent() {
               className="text-xs bg-slate-50 border border-slate-200 text-slate-700 rounded-lg px-2.5 py-1.5 focus:outline-none capitalize"
             >
               <option value="all">All Priorities</option>
-              <option value="urgent">Urgent</option>
-              <option value="high">High</option>
-              <option value="medium">Medium</option>
-              <option value="low">Low</option>
+              {TASK_PRIORITIES.map((p) => (
+                <option key={p} value={p}>
+                  {priorityLabel(p)}
+                </option>
+              ))}
             </select>
 
             {/* Add Task Button */}
             <button
-              onClick={() => {
-                setCreateColumnId(statuses[0]?.id || '');
-                setShowCreateTaskModal(true);
-              }}
+              onClick={() => openCreateTask(statuses[0]?.id || '')}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold shadow-sm transition-colors"
             >
               <Plus className="w-3.5 h-3.5" />
@@ -387,15 +169,7 @@ function ProjectBoardContent() {
       {/* Error alert */}
       {error && (
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-4 w-full">
-          <div className="bg-rose-50 border border-rose-200 p-3 rounded-xl text-rose-700 text-xs flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
-              <span>{error}</span>
-            </div>
-            <button onClick={() => setError(null)} className="text-rose-500 hover:text-rose-700 font-bold">
-              ✕
-            </button>
-          </div>
+          <ErrorAlert message={error} onDismiss={board.clearError} />
         </div>
       )}
 
@@ -409,9 +183,7 @@ function ProjectBoardContent() {
           <DragDropContext onDragEnd={handleDragEnd}>
             <div className="flex items-start gap-4 min-w-max pb-6">
               {statuses.map((status) => {
-                const columnTasks = filteredTasks
-                  .filter((t) => t.statusId === status.id)
-                  .sort((a, b) => a.position - b.position);
+                const columnTasks = columnCards(visibleCards, status.id);
 
                 return (
                   <div
@@ -429,10 +201,7 @@ function ProjectBoardContent() {
                         </span>
                       </div>
                       <button
-                        onClick={() => {
-                          setCreateColumnId(status.id);
-                          setShowCreateTaskModal(true);
-                        }}
+                        onClick={() => openCreateTask(status.id)}
                         className="p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-200 rounded-md transition-colors"
                         title={`Add task to ${status.name}`}
                       >
@@ -463,7 +232,7 @@ function ProjectBoardContent() {
                                     task={task}
                                     workflowStatuses={statuses}
                                     onClick={() => setSelectedTaskId(task.id)}
-                                    onMoveToStatus={(destId) => handleKeyboardMove(task.id, destId)}
+                                    onMoveToStatus={(destId) => void board.moveTask(task.id, destId)}
                                   />
                                 </div>
                               )}
@@ -491,19 +260,17 @@ function ProjectBoardContent() {
       {selectedTaskId && (
         <TaskModal
           taskId={selectedTaskId}
-          projectId={projectId}
           workflowStatuses={statuses}
           projectMembers={members}
           onClose={() => setSelectedTaskId(null)}
-          onTaskUpdated={loadProjectData}
+          onTaskUpdated={board.reload}
+          onTaskDeleted={board.forgetTask}
         />
       )}
 
       {/* Create Task Modal */}
       {showCreateTaskModal && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-md p-6">
-            <h3 className="text-base font-bold text-slate-900 mb-4">Create New Task</h3>
+        <Modal title="Create New Task" onClose={() => setShowCreateTaskModal(false)}>
             <form onSubmit={handleCreateTask} className="space-y-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-600 mb-1">Title</label>
@@ -541,10 +308,11 @@ function ProjectBoardContent() {
                     onChange={(e) => setNewTaskPriority(e.target.value)}
                     className="w-full text-xs border border-slate-200 rounded-lg px-2.5 py-2 focus:outline-none capitalize"
                   >
-                    <option value="urgent">Urgent</option>
-                    <option value="high">High</option>
-                    <option value="medium">Medium</option>
-                    <option value="low">Low</option>
+                    {TASK_PRIORITIES.map((p) => (
+                      <option key={p} value={p}>
+                        {priorityLabel(p)}
+                      </option>
+                    ))}
                   </select>
                 </div>
               </div>
@@ -565,31 +333,14 @@ function ProjectBoardContent() {
                 </select>
               </div>
 
-              <div className="flex justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowCreateTaskModal(false)}
-                  className="px-4 py-2 border border-slate-200 text-slate-700 rounded-lg text-xs font-semibold hover:bg-slate-50 transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold shadow-sm transition-colors"
-                >
-                  Create Task
-                </button>
-              </div>
+              <ModalActions onCancel={() => setShowCreateTaskModal(false)} submitLabel="Create Task" />
             </form>
-          </div>
-        </div>
+        </Modal>
       )}
 
       {/* Add Column Modal */}
       {showAddColumnModal && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-sm p-6">
-            <h3 className="text-base font-bold text-slate-900 mb-4">Add Workflow Column</h3>
+        <Modal title="Add Workflow Column" size="sm" onClose={() => setShowAddColumnModal(false)}>
             <form onSubmit={handleAddColumn} className="space-y-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-600 mb-1">Column Name</label>
@@ -601,7 +352,7 @@ function ProjectBoardContent() {
                   onChange={(e) => {
                     setNewColumnName(e.target.value);
                     if (!newColumnKey) {
-                      setNewColumnKey(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '_'));
+                      setNewColumnKey(statusKeyFor(e.target.value));
                     }
                   }}
                   className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
@@ -620,24 +371,9 @@ function ProjectBoardContent() {
                 />
               </div>
 
-              <div className="flex justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowAddColumnModal(false)}
-                  className="px-4 py-2 border border-slate-200 text-slate-700 rounded-lg text-xs font-semibold hover:bg-slate-50 transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold shadow-sm transition-colors"
-                >
-                  Add Column
-                </button>
-              </div>
+              <ModalActions onCancel={() => setShowAddColumnModal(false)} submitLabel="Add Column" />
             </form>
-          </div>
-        </div>
+        </Modal>
       )}
     </div>
   );
