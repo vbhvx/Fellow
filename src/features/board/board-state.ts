@@ -35,18 +35,42 @@ export function upsertCard(cards: BoardCard[], incoming: BoardCard): BoardCard[]
   return next;
 }
 
+/**
+ * Undoes one failed optimistic move: puts that card back where it was, and touches nothing else, so
+ * other moves and realtime updates made meanwhile survive. If the server has since sent a newer
+ * version of the card, that version is the truth and is kept.
+ */
+export function revertMove(cards: BoardCard[], original: BoardCard): BoardCard[] {
+  return cards.map((c) =>
+    c.id === original.id && (c.version ?? 0) <= (original.version ?? 0)
+      ? { ...c, statusId: original.statusId, position: original.position }
+      : c
+  );
+}
+
 export function removeCard(cards: BoardCard[], taskId: string): BoardCard[] {
   return cards.filter((c) => c.id !== taskId);
 }
 
-/** Applies a realtime event for this project; events for other projects leave the list as it is. */
-export function applyRealtimeEvent(cards: BoardCard[], event: CollaborationEvent, projectId: string): BoardCard[] {
+/**
+ * Applies a realtime event for this project; events for other projects leave the list as it is.
+ * Each event is relayed by its own transaction, so an update committed just before a delete can
+ * arrive just after it: `deletedIds` (tasks this board has seen deleted) keeps it from coming back.
+ */
+export function applyRealtimeEvent(
+  cards: BoardCard[],
+  event: CollaborationEvent,
+  projectId: string,
+  deletedIds: ReadonlySet<string> = new Set()
+): BoardCard[] {
   if (event.projectId && event.projectId !== projectId) return cards;
   switch (event.type) {
     case 'task.created':
     case 'task.updated':
-    case 'task.moved':
-      return event.payload.task ? upsertCard(cards, event.payload.task as BoardCard) : cards;
+    case 'task.moved': {
+      const task = event.payload.task as BoardCard | undefined;
+      return task && !deletedIds.has(task.id) ? upsertCard(cards, task) : cards;
+    }
     case 'task.deleted':
       return removeCard(cards, event.payload.taskId as string);
     default:

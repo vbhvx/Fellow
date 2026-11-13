@@ -10,6 +10,7 @@ import {
   dropTarget,
   endOfColumn,
   removeCard,
+  revertMove,
   statusKeyFor,
   upsertCard,
   type BoardCard,
@@ -56,19 +57,24 @@ export function useProjectBoard(projectId: string) {
     void reload();
   }, [reload]);
 
+  // Tasks seen deleted on this board; deletion is final, so late events for them are dropped.
+  const deletedIds = useRef(new Set<string>());
   const onEvent = useCallback(
-    (event: CollaborationEvent) => setCards((prev) => applyRealtimeEvent(prev, event, projectId)),
+    (event: CollaborationEvent) => {
+      if (event.type === 'task.deleted') deletedIds.current.add(event.payload.taskId as string);
+      setCards((prev) => applyRealtimeEvent(prev, event, projectId, deletedIds.current));
+    },
     [projectId]
   );
   const { status: realtimeStatus } = useRealtime(project?.organizationId, onEvent, reload);
 
   /** Moves a card; `index` is its slot in the destination column, or the end when omitted. */
   const moveTask = useCallback(async (taskId: string, statusId: string, index?: number) => {
-    const before = cardsRef.current;
-    const card = before.find((c) => c.id === taskId);
+    const current = cardsRef.current;
+    const card = current.find((c) => c.id === taskId);
     if (!card) return;
 
-    const target = index === undefined ? endOfColumn(before, taskId, statusId) : dropTarget(before, taskId, statusId, index);
+    const target = index === undefined ? endOfColumn(current, taskId, statusId) : dropTarget(current, taskId, statusId, index);
     setCards((prev) => prev.map((c) => (c.id === taskId ? { ...c, statusId, position: target.position } : c)));
 
     try {
@@ -80,8 +86,8 @@ export function useProjectBoard(projectId: string) {
       });
       setCards((prev) => upsertCard(prev, moved));
     } catch (err) {
-      setCards(before);
-      setError(`Move failed: ${errorMessage(err)} The board was restored.`);
+      setCards((prev) => revertMove(prev, card));
+      setError(`Move failed: ${errorMessage(err)} The card was put back.`);
     }
   }, []);
 
@@ -119,7 +125,10 @@ export function useProjectBoard(projectId: string) {
     [projectId]
   );
 
-  const forgetTask = useCallback((taskId: string) => setCards((prev) => removeCard(prev, taskId)), []);
+  const forgetTask = useCallback((taskId: string) => {
+    deletedIds.current.add(taskId);
+    setCards((prev) => removeCard(prev, taskId));
+  }, []);
 
   return {
     project,

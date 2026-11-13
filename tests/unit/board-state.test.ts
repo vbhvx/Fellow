@@ -5,6 +5,7 @@ import {
   dropTarget,
   endOfColumn,
   filterCards,
+  revertMove,
   statusKeyFor,
   upsertCard,
   type BoardCard,
@@ -87,6 +88,28 @@ describe('board state', () => {
     it('appends at the end for a move without an index', () => {
       expect(endOfColumn(cards, 'm', 's')).toMatchObject({ prevTaskId: 'c', nextTaskId: null, position: 4000 });
     });
+  });
+
+  describe('revertMove', () => {
+    it('puts back only the card whose move failed', () => {
+      const original = card('a', 'todo', 1000, { version: 1 });
+      // a moved optimistically to done; b was moved (and confirmed) meanwhile
+      const now = [card('a', 'done', 5000, { version: 1 }), card('b', 'done', 6000, { version: 2 })];
+      const reverted = revertMove(now, original);
+      expect(reverted.find((c) => c.id === 'a')).toMatchObject({ statusId: 'todo', position: 1000 });
+      expect(reverted.find((c) => c.id === 'b')).toMatchObject({ statusId: 'done', position: 6000 });
+    });
+
+    it('keeps a newer server version of the card that arrived meanwhile', () => {
+      const original = card('a', 'todo', 1000, { version: 1 });
+      const now = [card('a', 'review', 3000, { version: 2 })];
+      expect(revertMove(now, original)[0]).toMatchObject({ statusId: 'review', version: 2 });
+    });
+  });
+
+  it('ignores a late update for a task this board saw deleted', () => {
+    const late = event('task.updated', { task: card('gone', 's', 1000, { version: 9 }) });
+    expect(applyRealtimeEvent([], late, 'p1', new Set(['gone']))).toEqual([]);
   });
 
   it('filters by title and priority', () => {
