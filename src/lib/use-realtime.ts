@@ -13,7 +13,7 @@ export interface CollaborationEvent {
   resourceId: string;
   version?: number;
   occurredAt: string;
-  payload: Record<string, any>;
+  payload: Record<string, unknown>;
 }
 
 const EVENT_TYPES = [
@@ -58,17 +58,18 @@ export function useRealtime(
     const seen = new Set<number>();
 
     const handleEvent = (e: MessageEvent) => {
+      let parsed: CollaborationEvent;
       try {
-        const parsed = JSON.parse(e.data) as CollaborationEvent;
-        if (typeof parsed.seq === 'number') {
-          if (seen.has(parsed.seq)) return;
-          seen.add(parsed.seq);
-          if (seen.size > SEEN_SEQ_CAPACITY) seen.delete(seen.values().next().value as number);
-        }
-        onEventRef.current?.(parsed);
+        parsed = JSON.parse(e.data) as CollaborationEvent;
       } catch {
-        // Ignore malformed frames
+        return; // a malformed frame; only parsing is guarded, so handler bugs still surface
       }
+      if (typeof parsed.seq === 'number') {
+        if (seen.has(parsed.seq)) return;
+        seen.add(parsed.seq);
+        if (seen.size > SEEN_SEQ_CAPACITY) seen.delete(seen.values().next().value as number);
+      }
+      onEventRef.current?.(parsed);
     };
 
     for (const type of EVENT_TYPES) es.addEventListener(type, handleEvent);

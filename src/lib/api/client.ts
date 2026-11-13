@@ -12,6 +12,18 @@ export class ApiError extends Error {
   }
 }
 
+/** True when the server rejected a write because the resource changed underneath it (HTTP 409). */
+export function isConflict(error: unknown): boolean {
+  return error instanceof ApiError && error.statusCode === 409;
+}
+
+/** A message safe to show the user for any thrown value, so callers never need `catch (err: any)`. */
+export function errorMessage(error: unknown, fallback = 'Something went wrong. Please try again.'): string {
+  if (error instanceof ApiError) return error.message;
+  if (error instanceof TypeError) return 'Could not reach the server. Check your connection and try again.';
+  return fallback;
+}
+
 export async function apiRequest<T = any>(
   path: string,
   options: RequestInit = {}
