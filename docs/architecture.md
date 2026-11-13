@@ -160,5 +160,6 @@ their own in `vitest.config.mts`.
 | `npm test` | all tests (needs PostgreSQL, see `.env.example`) |
 | `npm run lint`, `npm run typecheck` | ESLint, and TypeScript with unused-code checks |
 | `npm run verify` | lint, typecheck and tests, as CI runs them |
+| `npm run test:ui` | UI smoke test in headless Chrome against a running app (`BASE_URL`, `CHROME_PATH`) |
 | `npm run build` | production build |
 
