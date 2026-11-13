@@ -16,6 +16,9 @@ export const EVENT_CHANNEL = 'fellow_events';
 // reference and loaded from the outbox table by each listener.
 const MAX_INLINE_PAYLOAD_BYTES = 7500;
 
+/** Names this process's LISTEN connection in pg_stat_activity, for operators (and tests). */
+export const LISTENER_APPLICATION_NAME = `fellow-event-bus-${process.pid}`;
+
 type BusMessage = { envelope: CollaborationEnvelope } | { ref: number };
 
 export function encodeBusMessage(envelope: CollaborationEnvelope): string {
@@ -80,7 +83,7 @@ class EventBusListener {
   }
 
   private async connect() {
-    const client = new Client({ connectionString: resolveDatabaseUrl() });
+    const client = new Client({ connectionString: resolveDatabaseUrl(), application_name: LISTENER_APPLICATION_NAME });
     client.on('notification', (msg) => {
       if (msg.channel === EVENT_CHANNEL && msg.payload) void this.dispatch(msg.payload);
     });
@@ -90,8 +93,18 @@ class EventBusListener {
     });
     client.on('end', () => this.handleDisconnect(client));
 
-    await client.connect();
-    await client.query(`LISTEN ${EVENT_CHANNEL}`);
+    try {
+      await client.connect();
+      await client.query(`LISTEN ${EVENT_CHANNEL}`);
+    } catch (err) {
+      await client.end().catch(() => {});
+      throw err;
+    }
+    if (this.stopped) {
+      // stop() was called while we were connecting: do not leave a listener running.
+      await client.end().catch(() => {});
+      return;
+    }
     this.client = client;
     this.retryDelayMs = 500;
     logger.info('event bus listening', { channel: EVENT_CHANNEL });
@@ -104,10 +117,20 @@ class EventBusListener {
 
     // Events committed while we were disconnected are not lost: SSE clients reconnect with
     // Last-Event-ID and the stream route replays them from the outbox table.
+    this.scheduleReconnect();
+  }
+
+  /** Retries with exponential backoff until connected or stopped; a failed attempt schedules the next. */
+  private scheduleReconnect() {
+    if (this.stopped) return;
     const delay = this.retryDelayMs;
     this.retryDelayMs = Math.min(this.retryDelayMs * 2, 30_000);
     setTimeout(() => {
-      this.start().catch((err) => logger.error('event bus reconnect failed', { err }));
+      if (this.stopped) return; // stopped while waiting: start() would otherwise undo that
+      this.start().catch((err) => {
+        logger.error('event bus reconnect failed', { err, retryInMs: this.retryDelayMs });
+        this.scheduleReconnect();
+      });
     }, delay).unref?.();
   }
 
