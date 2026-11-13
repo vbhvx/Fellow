@@ -46,14 +46,31 @@ for (let i = 0; i < 50 && !target; i++) { await sleep(200); try { target = (awai
 const ws = new WebSocket(target.webSocketDebuggerUrl);
 await new Promise((r) => ws.addEventListener('open', r));
 let id = 0; const pending = new Map(); const errors = [];
+let onRequestPaused = null; // set while the test intercepts the realtime stream
 ws.addEventListener('message', (m) => {
   const msg = JSON.parse(m.data);
+  if (msg.method === 'Fetch.requestPaused' && onRequestPaused) onRequestPaused(msg.params);
   if (msg.id && pending.has(msg.id)) { pending.get(msg.id)(msg); pending.delete(msg.id); }
   if (msg.method === 'Runtime.exceptionThrown') errors.push(msg.params.exceptionDetails.exception?.description?.split('\n')[0]);
   if (msg.method === 'Runtime.consoleAPICalled' && msg.params.type === 'error') errors.push(msg.params.args.map((a) => a.value ?? a.description).join(' ').slice(0, 200));
 });
-const send = (method, params = {}) => new Promise((r) => { const i = ++id; pending.set(i, r); ws.send(JSON.stringify({ id: i, method, params })); });
-const evaluate = async (expr) => (await send('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true })).result?.result?.value;
+// Every DevTools call times out, so a stuck call fails the run instead of hanging it.
+const send = (method, params = {}) =>
+  new Promise((resolve, reject) => {
+    const i = ++id;
+    const timer = setTimeout(() => { pending.delete(i); reject(new Error(`CDP ${method} timed out`)); }, 20000);
+    pending.set(i, (msg) => { clearTimeout(timer); resolve(msg); });
+    ws.send(JSON.stringify({ id: i, method, params }));
+  });
+// A page that stops answering counts as a failed check, not a crashed run.
+const evaluate = async (expr) => {
+  try {
+    return (await send('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true })).result?.result?.value;
+  } catch (err) {
+    errors.push(String(err.message));
+    return undefined;
+  }
+};
 const waitFor = async (expr, ms = 8000) => { const end = Date.now() + ms; while (Date.now() < end) { if (await evaluate(expr)) return true; await sleep(100); } return false; };
 const shot = async (name) => { const r = await send('Page.captureScreenshot', { format: 'png' }); writeFileSync(join(OUT, name + '.png'), Buffer.from(r.result.data, 'base64')); };
 const key = async (k, mods = 0, code = k) => { for (const type of ['keyDown', 'keyUp']) await send('Input.dispatchKeyEvent', { type, key: k, code, modifiers: mods, windowsVirtualKeyCode: k === 'Escape' ? 27 : k.toUpperCase().charCodeAt(0) }); };
@@ -121,6 +138,37 @@ result('move persists on the server', serverTasks.find((t) => t.title === 'Assig
 const inDone = await evaluate(`(()=>{const col=[...document.querySelectorAll('h3')].find(h=>h.textContent.trim()==='Done').closest('div.w-80');return col.innerText.includes('Assigned to me')})()`);
 result('moved card shows in Done', inDone);
 await shot('4-board-after');
+
+// Realtime survives a refused reconnect. The first stream request gets a stream that ends at once, so
+// the browser reconnects; the next ones are refused with 503 (as when the event bus is down), which
+// makes the browser give up for good. The app must then reconnect by itself.
+let streamRequests = 0;
+let refusals = 0;
+let refusing = true;
+onRequestPaused = (p) => {
+  streamRequests++;
+  if (streamRequests === 1) {
+    const body = Buffer.from('retry: 200\n\n').toString('base64');
+    send('Fetch.fulfillRequest', { requestId: p.requestId, responseCode: 200, responseHeaders: [{ name: 'Content-Type', value: 'text/event-stream' }], body });
+  } else if (refusing) {
+    refusals++;
+    const body = Buffer.from('{"error":{"code":"UNAVAILABLE"}}').toString('base64');
+    send('Fetch.fulfillRequest', { requestId: p.requestId, responseCode: 503, responseHeaders: [{ name: 'Content-Type', value: 'application/json' }], body });
+  } else {
+    send('Fetch.continueRequest', { requestId: p.requestId });
+  }
+};
+await send('Fetch.enable', { patterns: [{ urlPattern: '*/api/v1/realtime/stream*', requestStage: 'Request' }] });
+await go(`/projects/${prj.id}`);
+const badge = `(document.querySelector('header [title^="Real-time"]')?.innerText ?? '').trim().toLowerCase()`;
+for (let i = 0; i < 100 && refusals < 2; i++) await sleep(100); // refused at least twice, so the browser has given up
+result('the browser gives up after refused reconnects', refusals >= 2 && (await evaluate(`${badge} !== 'connected'`)), `refused ${refusals}x`);
+refusing = false;
+result('the app reconnects by itself', await waitFor(`${badge} === 'connected'`, 20000));
+await send('Fetch.disable');
+onRequestPaused = null;
+await api('POST', `/api/v1/projects/${prj.id}/tasks`, { title: 'Arrived after reconnect', statusId: todo.id });
+result('live updates flow again without a reload', await waitFor(`document.body.innerText.includes('Arrived after reconnect')`, 8000));
 
 // Task dialog opens with its history; Escape is not wired there (it has its own close)
 await evaluate(`[...document.querySelectorAll('h4')].find(h=>h.textContent==='Assigned to me').closest('div.group').click()`);

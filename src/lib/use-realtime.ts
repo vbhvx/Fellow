@@ -27,6 +27,9 @@ const EVENT_TYPES = [
 
 // Replayed and live deliveries can overlap around a reconnect; remember recent seqs to drop dupes.
 const SEEN_SEQ_CAPACITY = 500;
+// Backoff for reconnects the browser will not attempt itself.
+const MIN_RETRY_MS = 1_000;
+const MAX_RETRY_MS = 30_000;
 
 export function useRealtime(
   organizationId?: string | null,
@@ -35,7 +38,6 @@ export function useRealtime(
   onResync?: () => void
 ) {
   const [status, setStatus] = useState<RealtimeStatus>('disconnected');
-  const eventSourceRef = useRef<EventSource | null>(null);
   const onEventRef = useRef(onEvent);
   onEventRef.current = onEvent;
   const onResyncRef = useRef(onResync);
@@ -47,14 +49,15 @@ export function useRealtime(
       return;
     }
 
-    setStatus('connecting');
-    const es = new EventSource(`/api/v1/realtime/stream?organizationId=${encodeURIComponent(organizationId)}`);
-    eventSourceRef.current = es;
-
-    es.addEventListener('open', () => {
-      setStatus('connected');
-    });
-
+    // Connection states: connecting -> connected; on a dropped stream the browser retries by itself
+    // (status: connecting) and sends Last-Event-ID. If the server *refuses* a reconnect (401, 403,
+    // 503), the browser gives up for good (readyState CLOSED), so we reconnect ourselves with
+    // backoff, passing the last seq we saw so the server replays the gap.
+    let es: EventSource | null = null;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+    let retryDelay = MIN_RETRY_MS;
+    let lastSeq: number | null = null;
+    let reopened = false;
     const seen = new Set<number>();
 
     const handleEvent = (e: MessageEvent) => {
@@ -68,21 +71,45 @@ export function useRealtime(
         if (seen.has(parsed.seq)) return;
         seen.add(parsed.seq);
         if (seen.size > SEEN_SEQ_CAPACITY) seen.delete(seen.values().next().value as number);
+        lastSeq = Math.max(lastSeq ?? 0, parsed.seq);
       }
       onEventRef.current?.(parsed);
     };
 
-    for (const type of EVENT_TYPES) es.addEventListener(type, handleEvent);
-    es.addEventListener('system.resync', () => onResyncRef.current?.());
+    const connect = () => {
+      setStatus('connecting');
+      const params = new URLSearchParams({ organizationId });
+      if (lastSeq !== null) params.set('lastEventId', String(lastSeq));
+      const source = new EventSource(`/api/v1/realtime/stream?${params}`);
+      es = source;
 
-    // EventSource reconnects on its own and sends Last-Event-ID, so the server replays the gap.
-    es.onerror = () => {
-      setStatus('disconnected');
+      source.addEventListener('open', () => {
+        retryDelay = MIN_RETRY_MS;
+        setStatus('connected');
+        // Reopened without a seq to resume from: nothing can be replayed, so refetch instead.
+        if (reopened && lastSeq === null) onResyncRef.current?.();
+      });
+      for (const type of EVENT_TYPES) source.addEventListener(type, handleEvent);
+      source.addEventListener('system.resync', () => onResyncRef.current?.());
+
+      source.onerror = () => {
+        if (source.readyState === EventSource.CLOSED) {
+          source.close();
+          setStatus('disconnected');
+          reopened = true;
+          retryTimer = setTimeout(connect, retryDelay);
+          retryDelay = Math.min(retryDelay * 2, MAX_RETRY_MS);
+        } else {
+          setStatus('connecting'); // the browser is already retrying
+        }
+      };
     };
 
+    connect();
+
     return () => {
-      es.close();
-      eventSourceRef.current = null;
+      clearTimeout(retryTimer);
+      es?.close();
       setStatus('disconnected');
     };
   }, [organizationId]);
