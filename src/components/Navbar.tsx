@@ -8,6 +8,7 @@ import { ApiError } from '@/lib/api/client';
 import { authApi, notificationsApi, organizationsApi, searchApi } from '@/lib/api/endpoints';
 import type { Notification, Organization, SearchResults, User } from '@/lib/api/types';
 import type { RealtimeStatus } from '@/lib/use-realtime';
+import { BrandLogo } from '@/components/BrandLogo';
 
 interface NavbarProps {
   currentOrgId?: string;
@@ -108,10 +109,8 @@ export function Navbar({ currentOrgId, realtimeStatus }: NavbarProps) {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
         {/* Left: Brand & Org Switcher */}
         <div className="flex items-center gap-6">
-          <Link href="/dashboard" className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center text-white font-bold text-lg shadow-sm">
-              F
-            </div>
+          <Link href="/dashboard" className="flex items-center gap-2.5">
+            <BrandLogo className="w-8 h-8 rounded-lg shadow-sm" />
             <span className="font-bold text-slate-900 text-lg hidden sm:inline tracking-tight">Fellow</span>
           </Link>
 
